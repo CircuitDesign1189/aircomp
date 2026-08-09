@@ -13,6 +13,7 @@ See [CLAUDE.md](CLAUDE.md) for the full architecture, design rationale, and repo
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126   # GPU build; omit for CPU-only
 python scripts/download_model.py --model Qwen/Qwen2.5-1.5B-Instruct
 
 # Conventional (text + digital channel) baseline

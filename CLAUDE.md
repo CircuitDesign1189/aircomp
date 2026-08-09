@@ -127,7 +127,7 @@ evaluate.py                                 # CLI: run-baseline / snr-sweep
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -U pip
-pip install torch --index-url https://download.pytorch.org/whl/cu124   # falls back to CPU wheel if unavailable
+pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126   # GPU build; omit this line for CPU-only
 pip install -r requirements.txt
 
 # Model download (Qwen2.5-1.5B-Instruct by default — Apache-2.0, ungated)
@@ -164,5 +164,10 @@ pytest -m slow -q           # integration: requires the downloaded model
   model size).
 - **Invalid LLM output is a real, measured failure mode**, not something silently retried away —
   bounded retries (max 2) exist, but exhausting them counts as an implicit `REJECT` in the metrics.
-- Environment: Python 3.13, PyTorch, RTX 3060 12GB available (CUDA wheel needs to be installed
-  explicitly — the default `pip install torch` resolves to a CPU-only build on this machine).
+- Environment: Python 3.13, RTX 3060 12GB. The default `pip install torch` resolves to a CPU-only
+  build on this machine -- the CUDA build must be installed explicitly. As of the current driver
+  (CUDA UMD Version 13.3), the matching wheel is `cu126` (`torch==2.13.0+cu126`); `cu121`/`cu124`
+  do not publish a 2.13.0 build and `cu128`/`cu129` jump straight to torch >=2.7.0. Verified
+  working: `torch.cuda.is_available()` is `True` and LLM generation runs ~3-4x faster than on CPU.
+  `LocalLLM` auto-detects CUDA and falls back to CPU if unavailable, so no application code needs
+  to change when the wheel is swapped.
