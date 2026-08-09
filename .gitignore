@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.hf_cache/
+data/*.pt
+checkpoints/*.pt
+results/*.json
+*.egg-info/
+.pytest_cache/

@@ -1,0 +1,13 @@
+torch
+transformers>=4.44
+accelerate
+huggingface_hub
+numpy
+scipy
+pydantic>=2
+pyyaml
+pandas
+matplotlib
+pytest
+pytest-mock
+tqdm

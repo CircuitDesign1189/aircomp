@@ -1,0 +1,21 @@
+model:
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  device: "cuda"
+
+negotiation:
+  max_messages: 10
+  max_retries: 2
+  include_rationale: true
+
+channel:
+  channel_mode: "raw"
+  snr_db: 10.0
+
+jscc:
+  k: 16
+  snr_range: [-5.0, 20.0]
+
+train:
+  epochs: 30
+  lr: 0.001
+  batch_size: 64

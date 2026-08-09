@@ -1,0 +1,11 @@
+model:
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  device: "cuda"
+
+negotiation:
+  max_messages: 10
+  max_retries: 2
+  include_rationale: true
+
+jscc:
+  k: 16
