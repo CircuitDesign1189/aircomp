@@ -1,46 +1,46 @@
 # AirComp
 
-A research prototype comparing conventional text-based AI-agent communication against a
-**semantic / Joint Source-Channel Coding (JSCC)** pipeline that transmits compressed LLM latent
-representations over a simulated noisy wireless channel, using a bilateral negotiation task as
-the testbed.
+従来のテキストベースな AI エージェント間通信と、**セマンティック通信 / 統合情報源・通信路符号化
+(JSCC: Joint Source-Channel Coding)** パイプライン ―― LLM の潜在表現を圧縮し、雑音のある無線通信路
+のシミュレーション上で伝送する方式 ―― を比較する研究用プロトタイプです。評価タスクには二者間の
+交渉ゲームを用います。
 
-See [CLAUDE.md](CLAUDE.md) for the full architecture, design rationale, and repository layout.
+アーキテクチャ全体、設計判断の根拠、リポジトリ構成については [CLAUDE.md](CLAUDE.md) を参照してください。
 
-## Quickstart
+## クイックスタート
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126   # GPU build; omit for CPU-only
+pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126   # GPU 版。CPU のみで動かす場合はこの行を省略
 python scripts/download_model.py --model Qwen/Qwen2.5-1.5B-Instruct
 
-# Conventional (text + digital channel) baseline
+# 従来方式（テキスト + ディジタル通信路）のベースライン
 python evaluate.py run-baseline --episodes 50 --snr-db 10 --channel-mode raw
 
-# Collect a JSCC training set, then train the semantic encoder/decoder
+# JSCC 学習データを収集し、セマンティック エンコーダ / デコーダを学習
 python train.py collect-dataset --episodes 500 --out data/jscc_dataset.pt
 python train.py train-jscc --dataset data/jscc_dataset.pt --out checkpoints/jscc_v1.pt
 
-# Compare both pipelines across an SNR sweep
+# SNR スイープで両パイプラインを比較
 python evaluate.py snr-sweep --checkpoint checkpoints/jscc_v1.pt --episodes 100 --out results/sweep.json
 
 pytest -m "not slow" -q
 ```
 
-## Limitations
+## 制約事項
 
-- **No real wireless or network transmission.** Both agents run in the same Python process on
-  one machine; the "channel" is a mathematical noise model applied to tensors/bit arrays, not
-  real RF or network transport. This is a deliberate scoping choice for validating the
-  algorithmic hypothesis first (see CLAUDE.md).
-- **Bits vs. symbols are not directly comparable.** The sweep reports both a raw payload-size
-  comparison (bits for the digital pipeline, `k` real-valued symbols for the semantic pipeline)
-  and a Shannon-capacity-equivalent bit estimate for the semantic channel
-  (`k * 0.5*log2(1+SNR_linear)`) so this isn't misread as an apples-to-apples bandwidth claim.
-- **The LLM is frozen** during Phase 1 JSCC training (used only as a feature extractor); joint
-  fine-tuning of the LLM itself is future work, as is the differentiable task-outcome Phase 2
-  fine-tuning pass described in CLAUDE.md.
-- Evaluated with a single small model (Qwen2.5-1.5B-Instruct) and a synthetic 3-item negotiation
-  task; results may not generalize to larger models or richer negotiation domains.
+- **実際の無線送信もネットワーク伝送も行いません。** 2 つのエージェントは同一マシン上の同一 Python
+  プロセス内で動作し、「通信路」はテンソルやビット列に適用される数学的な雑音モデルであって、実際の
+  RF やネットワーク伝送ではありません。これはまずアルゴリズム的な仮説を検証するために意図的に設定
+  したスコープです（CLAUDE.md 参照）。
+- **ビット数とシンボル数は直接比較できません。** スイープでは、生のペイロードサイズの比較
+  （ディジタル方式はビット数、セマンティック方式は `k` 個の実数シンボル）に加えて、セマンティック
+  通信路についてシャノン容量換算のビット数推定値（`k * 0.5*log2(1+SNR_linear)`）も併せて報告します。
+  これは、両者を同一条件の帯域幅比較として誤読されないようにするためです。
+- **Phase 1 の JSCC 学習中、LLM は凍結されています**（特徴抽出器としてのみ使用）。LLM 自体の同時
+  ファインチューニングは今後の課題であり、CLAUDE.md に記載した微分可能なタスク成果ベースの Phase 2
+  ファインチューニングも同様に未実装です。
+- 評価は単一の小規模モデル（Qwen2.5-1.5B-Instruct）と、合成された 3 品目の交渉タスクで行っています。
+  より大きなモデルやより複雑な交渉ドメインに結果が一般化するとは限りません。
