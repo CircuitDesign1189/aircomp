@@ -5,5 +5,8 @@ __pycache__/
 data/*.pt
 checkpoints/*.pt
 results/*.json
+hwlab/results/*.json
+hwlab/results/*.bin
 *.egg-info/
 .pytest_cache/
+onnx/

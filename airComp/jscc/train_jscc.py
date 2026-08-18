@@ -5,6 +5,7 @@ SNR randomized per batch so the JSCC generalizes across channel conditions.
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -95,6 +96,10 @@ def train(
 
         loss_history.append(epoch_loss / max(n_batches, 1))
 
+    # Create the directory here, not in the caller: losing a finished training run
+    # on its very last line because a folder was missing is the worst possible
+    # failure mode for a job that takes minutes to hours.
+    Path(out_ckpt).parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "encoder": encoder.state_dict(),

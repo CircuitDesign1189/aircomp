@@ -13,9 +13,14 @@ ITEM_TYPES = ("book", "hat", "ball")
 @dataclass
 class ModelConfig:
     model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
+    #: "torch" runs everything on CPU/CUDA through transformers. "onnx-dml" runs
+    #: generation on the Radeon via onnxruntime-genai (30x faster here) and keeps
+    #: hidden-state pooling in torch on CPU. See airComp/agents/llm_onnx.py.
+    backend: str = "torch"
     device: str = "cuda"
     dtype: str = "float16"
     cache_dir: str = ".hf_cache"
+    genai_dir: str = "onnx/qwen-genai-int4-dml"
     max_new_tokens: int = 200
     temperature: float = 0.7
 

@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 
 from airComp.agents.baseline_agent import TextAgent
-from airComp.agents.llm_backend import LocalLLM
+from airComp.agents.factory import build_llm
 from airComp.channel.digital import DigitalChannel
 from airComp.config import load_config
 from airComp.env.negotiation import run_episode
@@ -16,7 +16,7 @@ from airComp.utils.logging import episode_record_to_dict
 
 def run(config_path: str, episodes: int, snr_db: float, channel_mode: str, out_path: str, seed_offset: int = 0):
     cfg = load_config(config_path)
-    llm = LocalLLM(cfg.model.model_name, cfg.model.device, cfg.model.dtype, cfg.model.cache_dir)
+    llm = build_llm(cfg.model)
     neg_cfg = cfg.negotiation
 
     out_file = Path(out_path)

@@ -1,0 +1,66 @@
+# Sweep configuration: same link as sdr_link.yaml, with extra margin.
+#
+# Differences from sdr_link.yaml, and why:
+#   preamble_len 1023  a sweep runs unattended for hours; frame detection must
+#                      never be the limiting factor. 1023 keeps burst loss at
+#                      zero down to about -19 dB instead of -13 dB, at the cost
+#                      of 5 ms more per burst (irrelevant next to LLM latency).
+#   max_retries 5      a lost burst is delivered to the decoder as noise-only,
+#                      which is honest but costs a data point. Retry harder.
+#
+# There is no config inheritance, so this file is complete on its own. Keep the
+# link/gains sections in step with sdr_link.yaml or the calibration will not
+# apply.
+
+link:
+  fs: 2000000.0
+  sps: 20
+  rolloff: 0.35
+  span_symbols: 24
+  if_offset_hz: 250000.0
+  center_freq_hz: 915000000.0
+  dac_peak: 0.8
+  capture_bursts: 3.0
+  min_peak_ratio: 5.5
+  max_retries: 5
+
+burst:
+  guard_symbols: 160
+  preamble_len: 1023     # odd and coprime with zc_root=25 (1023 = 3*11*31)
+  zc_root: 25
+  n_pilots: 32
+  n_data: 8
+
+gains:
+  tx_vga_db: 30.0
+  tx_amp: false
+  rx_lna_db: 24.0
+  rx_vga_db: 20.0
+
+device:
+  # Two units are addressed by serial: leaving these empty makes both the
+  # transmitter and the receiver open the same (first) radio.
+  tx_serial: "0000000000000000a06063c824923a5f"
+  rx_serial: "000000000000000016bc62dc2e679ba7"
+  clock_master_serial: ""   # empty -> tx_serial; see sdr_link.yaml
+  hackrf_transfer: hackrf_transfer
+  hackrf_clock: hackrf_clock
+  hackrf_info: hackrf_info
+  workdir: ""
+  tx_settle_s: 0.4
+  tx_margin_s: 1.0
+
+loopback:
+  path_loss_db: 90.0
+  noise_floor_dbfs: -66.0
+  phase_offset_deg: 37.0
+  timing_offset_samples: 613
+  dc_offset: 0.01
+  quantize: true
+  seed: 0
+
+# Use a separate calibration file from sdr_link.yaml. The preamble is what the
+# channel estimate is derived from, so changing its length changes how much
+# estimation noise ends up in the reported SNR -- a table measured with a
+# 511-symbol preamble does not describe this link.
+calibration_path: hwlab/results/calibration_sweep.json

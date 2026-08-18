@@ -5,12 +5,13 @@ rather than random pool/value draws.
 from __future__ import annotations
 
 import argparse
+import time
 
 import numpy as np
 import torch
 
 from airComp.agents.baseline_agent import TextAgent
-from airComp.agents.llm_backend import LocalLLM
+from airComp.agents.factory import build_llm
 from airComp.agents.semantic_agent import SemanticAgent
 from airComp.channel.digital import DigitalChannel
 from airComp.config import ITEM_TYPES, JSCCConfig, load_config
@@ -69,9 +70,18 @@ def summarize(records: list, pipeline_key: str) -> dict:
     return summary
 
 
-def run_sweep(config_path: str, checkpoint_path: str, episodes: int, snr_grid: list, out_path: str) -> dict:
+#: Conditions run by default. Selecting a subset matters for cost, not just tidiness:
+#: the baseline conditions are the expensive ones at low SNR, because corrupted JSON
+#: drives the parser's bounded retries and each episode costs up to 3x the LLM calls.
+#: Extending the grid downward to find the semantic knee is ~30 min semantic-only and
+#: hours with the baselines -- and the baselines are already flat at 0.00 by then.
+ALL_PIPELINES = ("raw", "arq", "semantic")
+
+
+def run_sweep(config_path: str, checkpoint_path: str, episodes: int, snr_grid: list, out_path: str,
+              pipelines=ALL_PIPELINES) -> dict:
     cfg = load_config(config_path)
-    llm = LocalLLM(cfg.model.model_name, cfg.model.device, cfg.model.dtype, cfg.model.cache_dir)
+    llm = build_llm(cfg.model)
 
     ckpt = torch.load(checkpoint_path, weights_only=False)
     jscc_cfg: JSCCConfig = ckpt.get("jscc_cfg", cfg.jscc)
@@ -81,19 +91,43 @@ def run_sweep(config_path: str, checkpoint_path: str, episodes: int, snr_grid: l
     encoder.load_state_dict(ckpt["encoder"])
     decoder.load_state_dict(ckpt["decoder"])
 
-    results = {"raw": {}, "arq": {}, "semantic": {}}
+    unknown = [p for p in pipelines if p not in ALL_PIPELINES]
+    if unknown:
+        raise ValueError(f"unknown pipeline(s) {unknown}; choose from {list(ALL_PIPELINES)}")
+
+    results = {p: {} for p in pipelines}
+    # Report per condition rather than per grid point: a grid point is three
+    # conditions x `episodes`, so at 50 episodes the first sign of life would
+    # otherwise be an hour away.
+    started = time.time()
+    total_units = len(pipelines) * len(snr_grid)
+    done_units = 0
     for snr_db in snr_grid:
         seed_offset = int(snr_db * 10_000) + 1_000_000  # deterministic, distinct seed block per SNR point
-        recs_raw = _run_baseline_condition(llm, cfg.negotiation, snr_db, "raw", episodes, seed_offset)
-        recs_arq = _run_baseline_condition(llm, cfg.negotiation, snr_db, "arq", episodes, seed_offset)
-        recs_sem = _run_semantic_condition(llm, cfg.negotiation, jscc_cfg, encoder, decoder, snr_db, episodes, seed_offset, "cpu")
+        runners = {
+            "raw": lambda: _run_baseline_condition(llm, cfg.negotiation, snr_db, "raw", episodes, seed_offset),
+            "arq": lambda: _run_baseline_condition(llm, cfg.negotiation, snr_db, "arq", episodes, seed_offset),
+            "semantic": lambda: _run_semantic_condition(
+                llm, cfg.negotiation, jscc_cfg, encoder, decoder, snr_db, episodes, seed_offset, "cpu"),
+        }
+        for key in pipelines:
+            runner = runners[key]
+            t0 = time.time()
+            records = runner()
+            results[key][str(snr_db)] = summarize(records, "semantic" if key == "semantic" else "digital")
+            done_units += 1
+            rate = (time.time() - started) / done_units
+            print(
+                f"[{done_units:2d}/{total_units}] SNR {snr_db:+.0f} dB {key:8s} "
+                f"agreement {results[key][str(snr_db)]['agreement_rate']:.2f}  "
+                f"{(time.time()-t0)/episodes:.1f} s/episode  "
+                f"eta {(total_units - done_units) * rate / 60:.0f} min",
+                flush=True,
+            )
+            # Written after every condition: this run takes hours, and losing all of
+            # it to a crash in the last grid point is not an acceptable failure mode.
+            write_json(out_path, results)
 
-        results["raw"][str(snr_db)] = summarize(recs_raw, "digital")
-        results["arq"][str(snr_db)] = summarize(recs_arq, "digital")
-        results["semantic"][str(snr_db)] = summarize(recs_sem, "semantic")
-        print(f"SNR={snr_db}dB done")
-
-    write_json(out_path, results)
     return results
 
 

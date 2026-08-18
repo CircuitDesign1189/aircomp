@@ -1,0 +1,18 @@
+# hwlab additional requirements.
+#
+# Everything here is already in the project's top-level requirements.txt --
+# hwlab deliberately adds NO new Python dependencies. It is listed separately so
+# the hardware layer's needs are explicit.
+numpy
+scipy
+pyyaml
+torch          # only for the tensor interface to SemanticAgent; no autograd is used
+pytest
+
+# NOT a Python package: the HackRF command-line tools (hackrf_transfer,
+# hackrf_clock, hackrf_info) must be on PATH for --backend hackrf.
+#   Windows: download the official hackrf release zip and add its bin/ to PATH
+#   Verify:  hackrf_info
+#
+# --backend loopback needs none of that: the entire DSP chain runs in numpy,
+# which is how the whole package is developed and tested.

@@ -23,12 +23,26 @@ This connects two established research threads:
 - **Semantic communication / JSCC**: neural encoder/decoder pairs trained end-to-end to preserve
   task-relevant meaning under channel noise, rather than optimizing for exact bit recovery.
 
-**Scope of the current prototype**: pure software simulation, single machine, single Python
-process. Both negotiating agents run sequentially in one process; the "wireless channel" is a
-tensor operation (`z + noise`), not real RF or even real network transport. This is a deliberate
-choice (see "Explicitly out of scope" below) to validate the algorithmic hypothesis before adding
-hardware/network complexity. It is also the standard evaluation methodology in the JSCC/semantic
-communication literature.
+`docs/related_work.md` places this project against those threads plus two more (the 3GPP/AI-RAN
+"AI-native air interface" standardization track, and the 2024-2026 LLM latent-communication
+literature). Read it before writing anything that claims novelty. Two things here are *not*
+novel, and claiming them will get the work dismissed: the two-sided encoder/decoder mechanism
+(3GPP Release 20 carries it as a work item, targeting CSI), and validating JSCC on a real SDR
+(arXiv:2410.17536 is a prototype-validation paper). What is unoccupied is the combination — LLM
+latents as the payload, evaluated by downstream task utility, with hardware and simulation
+paired episode-for-episode. The doc also lists the standard objections and what this repo
+already contains to answer them.
+
+**Scope**: there are now TWO channel implementations, and they share the DSP-facing seam.
+
+- **Simulated** (`airComp/`): both agents run sequentially in one process and the "wireless
+  channel" is a tensor operation (`z + noise`). This is the standard evaluation methodology in the
+  JSCC/semantic communication literature, and it is what the SNR sweep in `airComp/eval/` uses.
+- **Real RF** (`hwlab/`): the same latent vector is pulse-shaped, transmitted from one HackRF One
+  and received by another over a conducted coax path with a calibrated attenuator. See
+  `hwlab/README.md`. Both sweeps derive episode seeds from the same formula, so their curves are
+  paired episode-for-episode and can be overlaid; a systematic gap between them is a bug, not a
+  physical effect.
 
 ## Architecture
 
@@ -68,14 +82,19 @@ graceful-vs-catastrophic degradation comparison across SNR.
 
 ### Explicitly out of scope (for now)
 
-No real RF transmission and no real network transport occur in this prototype — see the "Scope"
-note above. Two possible future extensions, not yet implemented:
-- Real socket-based transport (TCP/UDP) between two processes/machines, with noise injected
-  synthetically at the sender (real LAN/Wi-Fi already error-corrects at the physical layer, so bit
-  errors can't be observed without going below that stack).
-- Real SDR hardware (USRP/HackRF/LimeSDR) for actual RF transmission. `airComp/channel/base.py`
-  defines an abstract `Channel` interface specifically so a future SDR-backed implementation can
-  be swapped in without touching agent/task code.
+- **Real network transport.** No socket-based transport (TCP/UDP) between processes or machines.
+  Real LAN/Wi-Fi already error-corrects at the physical layer, so bit errors cannot be observed
+  without going below that stack.
+- **Over-the-air radiation.** The HackRF path is *conducted* only: coax plus a calibrated
+  attenuator, nothing radiated. HackRF One carries no Japanese 技適 mark, so radiating outside a
+  shielded box would violate 電波法. It is also the cleanest channel scientifically — no multipath,
+  no fading, no external interference — i.e. as close to the AWGN model as a real radio gets.
+- **Spatial separation between the two agents.** Both radios sit on one bench driven by one
+  process.
+
+Note that "no real RF" is no longer on this list: `hwlab/` transmits for real. The abstract
+`Channel` seam in `airComp/channel/base.py` is what let that be added without touching agent or
+task code, and `hwlab/radio/backend.py` carries the same idea one level lower.
 
 ## Repository layout
 
@@ -127,7 +146,7 @@ evaluate.py                                 # CLI: run-baseline / snr-sweep
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -U pip
-pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126   # GPU build; omit this line for CPU-only
+pip install torch                     # CPU build. This machine has an AMD GPU; see the environment note below -- do NOT install a CUDA wheel.
 pip install -r requirements.txt
 
 # Model download (Qwen2.5-1.5B-Instruct by default — Apache-2.0, ungated)
@@ -164,10 +183,36 @@ pytest -m slow -q           # integration: requires the downloaded model
   model size).
 - **Invalid LLM output is a real, measured failure mode**, not something silently retried away —
   bounded retries (max 2) exist, but exhausting them counts as an implicit `REJECT` in the metrics.
-- Environment: Python 3.13, RTX 3060 12GB. The default `pip install torch` resolves to a CPU-only
-  build on this machine -- the CUDA build must be installed explicitly. As of the current driver
-  (CUDA UMD Version 13.3), the matching wheel is `cu126` (`torch==2.13.0+cu126`); `cu121`/`cu124`
-  do not publish a 2.13.0 build and `cu128`/`cu129` jump straight to torch >=2.7.0. Verified
-  working: `torch.cuda.is_available()` is `True` and LLM generation runs ~3-4x faster than on CPU.
-  `LocalLLM` auto-detects CUDA and falls back to CPU if unavailable, so no application code needs
-  to change when the wheel is swapped.
+- **Environment: Python 3.14, and the GPU is an AMD Radeon RX 9060 XT -- there is no NVIDIA card
+  in this machine** (verified 2026-08-18: no `VEN_10DE` device present). This supersedes an earlier
+  note in this file describing an RTX 3060 and a working `cu126` build; the hardware was changed.
+  **Do not install a CUDA wheel** -- `torch.cuda.is_available()` cannot become `True` here, so the
+  2.5 GB download buys nothing. `LocalLLM` already falls back to CPU, so `configs/*.yaml` saying
+  `device: "cuda"` is harmless.
+- **PyTorch has no GPU path here, but ONNX Runtime does -- and this is now wired up.**
+  `torch-directml` publishes no wheel for Python 3.14 and ROCm is Linux-only, so `torch` stays
+  CPU-only. `onnxruntime-genai-directml` drives the Radeon instead; set `model.backend: "onnx-dml"`
+  (the shipped configs already do) and build the model once with
+  `python scripts/build_genai_model.py`. See `airComp/agents/llm_onnx.py`.
+- **Use genai, not a generic ONNX graph.** Measured at a 250-token prompt:
+  CPU torch **345 ms/token**, generic ONNX on DirectML **189 ms/token**, genai on DirectML
+  **11 ms/token**. Batch-1 decode is hundreds of tiny operators, so it is bound by per-operator
+  dispatch, not bandwidth -- confirmed twice over, since raising KV-cache traffic 5x cost only 8%
+  and the *int4* generic graph was **slower** than fp16 (dequantization adds ops). genai's fused
+  decode kernels are what removes that overhead. A GEMV microbenchmark predicted 5.7x and was
+  badly misleading about which bottleneck mattered.
+- **Never install `optimum-onnx`**: it downgrades transformers 5.15 to 4.57 and replaces
+  onnxruntime-directml with the CPU build. The KV-cache handling is genai's, so it is not needed.
+- **End to end**: dataset collection went **38.9 -> 9.1 s per episode (4.3x)**, and yield rose from
+  1.29 to 2.00 examples/episode because the int4 model emits better-formed JSON. A 500-episode
+  collection is ~1.3 hours instead of ~5.4.
+- **Hidden states stay on CPU torch by design.** `chat_with_hidden` generates on the GPU but pools
+  from the torch model, so the pooled vector is numerically identical to everything collected
+  before the port -- no train/inference shift in the JSCC decoder. That prefill (~2.8 s) is now the
+  dominant per-turn cost and is the obvious next thing to move.
+- **Do not "optimize" the CPU path to bfloat16.** It looks right -- decode is memory-bandwidth
+  bound and bf16 halves the weight traffic -- but this CPU is AVX2-only with no AVX512-BF16, so
+  bf16 GEMM is emulated. Decode gains nothing and the compute-bound prefill in `chat_with_hidden`
+  goes from 2.8 s to 17 s; a full episode measured **32 s -> 60 s**. Raising `torch.set_num_threads`
+  from 8 to 16 also changes nothing (312 vs 315 ms/token), which is what confirms the bandwidth
+  limit. Measure the prefill, not just tokens/s, before believing any dtype change.

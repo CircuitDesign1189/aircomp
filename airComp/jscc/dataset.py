@@ -11,8 +11,8 @@ import numpy as np
 import torch
 
 from airComp.agents.llm_backend import LocalLLM
-from airComp.agents.parser import parse_offer
-from airComp.agents.prompts import history_prompt, system_prompt
+from airComp.agents.parser import parse_offer_with_retries
+from airComp.agents.prompts import history_prompt, retry_prompt, system_prompt
 from airComp.config import NegotiationConfig
 from airComp.env.negotiation import Pool, TurnRecord, generate_pool, generate_values
 
@@ -61,12 +61,26 @@ def collect_dataset(
             sys_prompt = system_prompt(pool, own_values, cfg.max_messages, cfg.include_rationale)
             user_prompt = history_prompt(history_turns, standing_offer)
 
-            text, hidden = llm.chat_with_hidden(sys_prompt, [], user_prompt)
-            result = parse_offer(text, pool)
-            if not result.ok:
+            # Same bounded-retry path the baseline agent uses. Without it, a turn-0
+            # formatting slip ends the episode with zero examples, and measurement on
+            # this model put that at roughly half of all episodes -- so the collector
+            # was throwing away half its runtime AND training the decoder on a
+            # different distribution from the one it has to serve.
+            hidden_by_attempt: list = []
+
+            def generate_fn(attempt: int, last_error, sys_prompt=sys_prompt, user_prompt=user_prompt):
+                prompt = user_prompt if last_error is None else retry_prompt(last_error)
+                text, hidden = llm.chat_with_hidden(sys_prompt, [], prompt)
+                hidden_by_attempt.append(hidden)
+                return text
+
+            offer, _, attempts = parse_offer_with_retries(generate_fn, pool, cfg.max_retries)
+            if offer is None:
                 break  # keep whatever examples this episode has already produced
 
-            offer = result.offer
+            # Pool the hidden state of the attempt that actually parsed -- that is the
+            # turn the receiver is being trained to reconstruct.
+            hidden = hidden_by_attempt[attempts - 1]
             counts = offer.counts if offer.action == "propose" else {t: 0 for t in pool.counts}
             examples.append(
                 JsccExample(

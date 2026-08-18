@@ -1,5 +1,7 @@
 model:
   model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  # onnx-dml runs generation on the Radeon (4.3x end to end); see airComp/agents/llm_onnx.py
+  backend: "onnx-dml"
   device: "cuda"
 
 negotiation:

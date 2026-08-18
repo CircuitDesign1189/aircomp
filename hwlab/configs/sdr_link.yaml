@@ -1,0 +1,65 @@
+# HackRF One x2 conducted link -- default operating point.
+#
+# Topology:
+#   HackRF #1 --TX-- coax -- [step attenuator, >=30 dB] -- coax --RX-- HackRF #2
+#        \______________ CLKOUT -- coax -- CLKIN _______________/
+#
+# The conducted (coax) path is the primary configuration: it radiates nothing,
+# so the lack of a Japanese 技適 mark on the HackRF is not an issue, AND it is
+# the cleanest channel scientifically -- no multipath, no fading, no external
+# interference, i.e. as close to the AWGN model in airComp/channel/analog.py as
+# a real radio gets. Over-the-air work belongs inside the shielded box.
+
+link:
+  fs: 2000000.0
+  sps: 20                # -> 100 ksym/s
+  rolloff: 0.35
+  span_symbols: 24       # ISI floor about -65 dB; see hwlab/config.py
+  if_offset_hz: 250000.0  # keep symbols OFF baseband DC (zero-IF spur)
+  center_freq_hz: 915000000.0
+  dac_peak: 0.8
+  capture_bursts: 3.0
+  min_peak_ratio: 5.5    # noise alone reaches 4.4; signal at -10 dB reaches 6.7
+  max_retries: 3
+
+burst:
+  guard_symbols: 160
+  preamble_len: 511      # raise to 1023 before sweeping below -15 dB
+  zc_root: 25
+  n_pilots: 32
+  n_data: 8              # = k/2, with JSCCConfig.k = 16
+
+# RX gains stay FIXED for an entire sweep. Move SNR with tx_vga_db and the
+# external attenuator only -- changing RX gain moves the ADC operating point.
+gains:
+  tx_vga_db: 30.0        # 0..47, 1 dB steps
+  tx_amp: false          # +14 dB; leave off, the TX must not damage the RX
+  rx_lna_db: 24.0        # 0..40, 8 dB steps
+  rx_vga_db: 20.0        # 0..62, 2 dB steps
+
+device:
+  tx_serial: "0000000000000000a06063c824923a5f"          # fill in from `hackrf_info` once both units are attached
+  rx_serial: "000000000000000016bc62dc2e679ba7"
+  # Which unit the CLOCK cable leaves from (its CLKOUT). Empty -> tx_serial.
+  # Set this when the reference cable runs the other way; a marginal CLKIN
+  # corrupts the slave's samples, and reversing the clock cable is the fix that
+  # does not disturb the TX/RX roles. See README "クロック基準リンク".
+  clock_master_serial: "000000000000000016bc62dc2e679ba7"
+  hackrf_transfer: hackrf_transfer
+  hackrf_clock: hackrf_clock
+  hackrf_info: hackrf_info
+  workdir: ""
+  tx_settle_s: 0.4       # PLL/AGC settling before the receiver is started
+  tx_margin_s: 1.0       # transmit must outlast the receiver's own start-up
+
+# Impairment model for --backend loopback (no hardware).
+loopback:
+  path_loss_db: 90.0
+  noise_floor_dbfs: -66.0
+  phase_offset_deg: 37.0
+  timing_offset_samples: 613
+  dc_offset: 0.01
+  quantize: true
+  seed: 0
+
+calibration_path: hwlab/results/calibration.json

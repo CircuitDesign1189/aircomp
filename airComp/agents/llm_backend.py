@@ -21,6 +21,11 @@ class LocalLLM:
     ):
         self.model_name = model_name
         self.device = device if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+        # float32 on CPU, deliberately. bfloat16 halves the weight traffic and does speed
+        # up decode, but this CPU is AVX2-only (no AVX512-BF16), so bf16 GEMM is emulated
+        # and the compute-bound prefill in chat_with_hidden goes from 2.8 s to 17 s.
+        # Measured net effect of bf16 on a full episode: 32 s -> 60 s. Do not "optimize"
+        # this without re-measuring the prefill, not just tokens/s.
         torch_dtype = getattr(torch, dtype) if self.device == "cuda" else torch.float32
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
