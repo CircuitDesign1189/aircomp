@@ -17,6 +17,7 @@ from airComp.config import NegotiationConfig
 from airComp.env.negotiation import Pool, TurnRecord, generate_pool, generate_values
 
 ACTION_TO_IDX = {"propose": 0, "accept": 1, "reject": 2}
+IDX_TO_ACTION = {v: k for k, v in ACTION_TO_IDX.items()}
 
 
 @dataclass
@@ -131,6 +132,21 @@ def collect_dataset(
                 break
             standing_offer = offer
 
+    return examples
+
+
+def backfill_embed_targets(examples: list, llm) -> list:
+    """Fill in `embed_target` on examples collected before that field existed
+    (or via a backend without `embed_text`), in place -- no re-collection.
+
+    `embed_target` is a pure function of `(action, counts)`; it never depended
+    on which backend produced `hidden`, so this only needs `llm.embed_text`
+    (an embedding-matrix lookup) run once per example, not a new negotiation
+    episode or generation call.
+    """
+    for ex in examples:
+        action = IDX_TO_ACTION[ex.action_idx]
+        ex.embed_target = llm.embed_text(offer_canonical_text(action, ex.counts))
     return examples
 
 

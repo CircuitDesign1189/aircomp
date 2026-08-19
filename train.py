@@ -7,8 +7,9 @@ import time
 import torch
 
 from airComp.agents.factory import build_llm
+from airComp.agents.llm_backend import LocalLLM
 from airComp.config import JSCCConfig, TrainConfig, load_config
-from airComp.jscc.dataset import collect_dataset, save_dataset
+from airComp.jscc.dataset import backfill_embed_targets, collect_dataset, load_dataset, save_dataset
 from airComp.jscc.train_jscc import train as train_jscc_fn
 
 
@@ -38,6 +39,21 @@ def cmd_collect_dataset(args):
             flush=True,
         )
     print(f"collected {len(examples)} examples -> {args.out}")
+
+
+def cmd_backfill_embed_targets(args):
+    """Add embed_target to a dataset that predates it (or was collected via a
+    backend without embed_text), without re-running any negotiation episodes.
+
+    Only LocalLLM (CPU torch) implements embed_text -- the ONNX genai backend
+    used for fast collection does not -- so this always loads the torch model
+    directly, regardless of which backend originally produced the dataset.
+    """
+    llm = LocalLLM(model_name=args.model_name, device="cpu")
+    examples = load_dataset(args.dataset)
+    backfill_embed_targets(examples, llm)
+    save_dataset(examples, args.out)
+    print(f"backfilled embed_target on {len(examples)} examples -> {args.out}")
 
 
 def cmd_train_jscc(args):
@@ -86,6 +102,16 @@ def main():
                               "text embedding of the offer. Needs a dataset collected with the CPU "
                               "torch backend (only it implements LocalLLM.embed_text).")
     p_train.set_defaults(func=cmd_train_jscc)
+
+    p_backfill = sub.add_parser(
+        "backfill-embed-targets",
+        help="add embed_target to a dataset collected before that field existed, in place -- "
+             "no re-collection, just an embedding-matrix lookup per example",
+    )
+    p_backfill.add_argument("--dataset", required=True)
+    p_backfill.add_argument("--out", required=True)
+    p_backfill.add_argument("--model-name", default="Qwen/Qwen2.5-1.5B-Instruct")
+    p_backfill.set_defaults(func=cmd_backfill_embed_targets)
 
     args = parser.parse_args()
     args.func(args)

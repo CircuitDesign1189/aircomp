@@ -55,6 +55,37 @@ def cmd_decoder_check(args):
     return 0 if verdict(table)[0] else 1
 
 
+def cmd_embed_check(args):
+    """Is the injectable embed head communicating, or emitting a prior?
+
+    Embed-head analog of decoder-check: cosine similarity to embed_target
+    instead of exact offer match. Needs a checkpoint trained with
+    --embed-loss-weight and a dataset with embed_target set (see
+    train.py backfill-embed-targets). See airComp/eval/reconstruction.py.
+    """
+    import torch
+
+    from airComp.config import ITEM_TYPES, JSCCConfig
+    from airComp.eval.reconstruction import embed_reconstruction_table, embed_verdict, format_embed_table
+    from airComp.jscc.modules import SemanticDecoder, SemanticEncoder
+
+    ckpt = torch.load(args.checkpoint, weights_only=False)
+    cfg: JSCCConfig = ckpt.get("jscc_cfg", JSCCConfig())
+    if cfg.embed_dim is None:
+        raise SystemExit(f"{args.checkpoint} has no embed_dim (jscc_cfg.embed_dim is None) -- "
+                         f"train with --embed-loss-weight > 0 first")
+    encoder = SemanticEncoder(ckpt["input_dim"], cfg.encoder_hidden_dims, cfg.k)
+    decoder = SemanticDecoder(cfg.k, cfg.decoder_hidden_dims, len(ITEM_TYPES), cfg.max_count, cfg.aux_dim,
+                              embed_dim=cfg.embed_dim)
+    encoder.load_state_dict(ckpt["encoder"])
+    decoder.load_state_dict(ckpt["decoder"])
+
+    examples = torch.load(args.dataset, weights_only=False)
+    table = embed_reconstruction_table(encoder, decoder, examples, args.snr_grid, cfg.max_count)
+    print(format_embed_table(table))
+    return 0 if embed_verdict(table)[0] else 1
+
+
 def cmd_visualize_latent(args):
     """Render a few example latent vectors as PNGs, clean vs. channel-noisy.
 
@@ -125,6 +156,16 @@ def main():
     p_check.add_argument("--dataset", required=True)
     p_check.add_argument("--snr-grid", type=float, nargs="+", default=[-10, -5, 0, 5, 10, 20])
     p_check.set_defaults(func=cmd_decoder_check)
+
+    p_embed_check = sub.add_parser(
+        "embed-check",
+        help="does the injectable embed head use the channel, or emit a prior? "
+             "Embed-head analog of decoder-check",
+    )
+    p_embed_check.add_argument("--checkpoint", required=True)
+    p_embed_check.add_argument("--dataset", required=True)
+    p_embed_check.add_argument("--snr-grid", type=float, nargs="+", default=[-10, -5, 0, 5, 10, 20])
+    p_embed_check.set_defaults(func=cmd_embed_check)
 
     p_viz = sub.add_parser(
         "visualize-latent",

@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections import Counter
 
 import torch
+import torch.nn.functional as F
 
 from airComp.channel.analog import AnalogAWGNChannel
 from airComp.config import ITEM_TYPES
@@ -154,6 +155,136 @@ def format_table(table: dict) -> str:
     lines.append(f"{'modal const':>14} {m['exact_offer']:>7.3f} {m['per_item']:>9.3f} {'-':>7}"
                  f"   (counts {m['counts']})")
     ok, why = verdict(table)
+    lines.append("")
+    lines.append(("PASS: " if ok else "FAIL: ") + why)
+    return "\n".join(lines)
+
+
+# -- embed head (the injectable-embedding decoder output) -------------------
+#
+# Same question as above -- "does the decoder use the channel, or emit a
+# prior?" -- for SemanticDecoder's optional embed head (airComp/jscc/modules.py)
+# instead of the offer/action heads. There is no exact-match here, only
+# direction in embedding space, so the discriminator is cosine similarity to
+# `JsccExample.embed_target`, scored against the same noise/zero conditions,
+# plus a "constant" floor -- a decoder that ignores its input and always
+# outputs the dataset's mean target -- standing in for `modal_constant`'s role.
+
+
+def _embed_decode(decoder, y: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+    return decoder(y, masks)["embed"]
+
+
+def _embed_score(pred: torch.Tensor, target: torch.Tensor) -> dict:
+    cos = F.cosine_similarity(pred, target, dim=-1)
+    return {"cosine_mean": cos.mean().item(), "cosine_min": cos.min().item()}
+
+
+def _embed_tensors(examples, max_count: int):
+    target = torch.stack([e.embed_target for e in examples]).float()
+    masks = torch.stack([pool_to_mask(e.pool, ITEM_TYPES, max_count) for e in examples])
+    hidden = torch.stack([e.hidden for e in examples]).float()
+    return hidden, target, masks
+
+
+def constant_embed(target: torch.Tensor) -> dict:
+    """What a decoder that ignores its input and always emits the dataset's
+    mean target embedding would score -- the embed-head analog of
+    `modal_constant`."""
+    mean = target.mean(dim=0, keepdim=True).expand_as(target)
+    return _embed_score(mean, target)
+
+
+def embed_reconstruction_table(
+    encoder,
+    decoder,
+    examples,
+    snr_grid=(-10.0, -5.0, 0.0, 5.0, 10.0, 20.0),
+    max_count: int = 4,
+    seed: int = 0,
+) -> dict:
+    """Score the embed head's cosine similarity to `embed_target` on real
+    signal, on pure noise, and against the constant-mean-embedding baseline.
+
+    `examples` must have `embed_target` set (see
+    `airComp/jscc/dataset.py:backfill_embed_targets`), and `decoder` must have
+    been constructed with `embed_dim` set (see `SemanticDecoder`).
+    """
+    torch.manual_seed(seed)
+    was_training = encoder.training or decoder.training
+    encoder.eval()
+    decoder.eval()
+
+    hidden, target, masks = _embed_tensors(examples, max_count)
+    channel = AnalogAWGNChannel()
+    conditions: dict = {}
+
+    with torch.no_grad():
+        z = encoder(hidden)
+        conditions["noiseless"] = _embed_score(_embed_decode(decoder, z, masks), target)
+        for snr in snr_grid:
+            conditions[f"snr_{snr:+.0f}"] = _embed_score(
+                _embed_decode(decoder, channel(z, float(snr)), masks), target
+            )
+        pure = torch.randn_like(z) * z.pow(2).mean().sqrt()
+        conditions["pure_noise"] = _embed_score(_embed_decode(decoder, pure, masks), target)
+        conditions["zeros"] = _embed_score(_embed_decode(decoder, torch.zeros_like(z), masks), target)
+
+    if was_training:
+        encoder.train()
+        decoder.train()
+
+    best_signal = max(
+        v["cosine_mean"] for k, v in conditions.items() if k == "noiseless" or k.startswith("snr_")
+    )
+    floor = max(conditions["pure_noise"]["cosine_mean"], conditions["zeros"]["cosine_mean"])
+    return {
+        "n": len(examples),
+        "conditions": conditions,
+        "constant_embed": constant_embed(target),
+        "input_dependence": best_signal - floor,
+    }
+
+
+def embed_verdict(table: dict) -> tuple[bool, str]:
+    """(communicating?, one-line explanation) -- embed-head analog of `verdict`.
+
+    Reuses MIN_INPUT_DEPENDENCE rather than re-deriving a cosine-specific
+    threshold: it was already chosen loose (a smoke test for "decoder is a
+    constant", not a quality bar), and that reasoning applies just as well to
+    a cosine-similarity gap.
+    """
+    gap = table["input_dependence"]
+    const = table["constant_embed"]["cosine_mean"]
+    best = max(
+        v["cosine_mean"]
+        for k, v in table["conditions"].items()
+        if k == "noiseless" or k.startswith("snr_")
+    )
+    if gap < MIN_INPUT_DEPENDENCE:
+        return False, (
+            f"embed head looks input-independent: best signal cosine {best:.3f} vs noise/zero floor "
+            f"{best - gap:.3f} (gap {gap:.3f} < {MIN_INPUT_DEPENDENCE}). Any downstream injection "
+            f"claim from this checkpoint means nothing."
+        )
+    if best <= const:
+        return False, (
+            f"embed head does not beat the constant-mean-embedding baseline ({best:.3f} vs {const:.3f}); "
+            f"it carries no more direction than the average target."
+        )
+    return True, (
+        f"embed head uses the channel: best signal cosine {best:.3f}, noise/zero floor {best - gap:.3f}, "
+        f"constant baseline {const:.3f}."
+    )
+
+
+def format_embed_table(table: dict) -> str:
+    lines = [f"n = {table['n']}", f"{'condition':>14} {'cosine':>8}"]
+    for name, s in table["conditions"].items():
+        lines.append(f"{name:>14} {s['cosine_mean']:>8.3f}")
+    c = table["constant_embed"]
+    lines.append(f"{'constant mean':>14} {c['cosine_mean']:>8.3f}")
+    ok, why = embed_verdict(table)
     lines.append("")
     lines.append(("PASS: " if ok else "FAIL: ") + why)
     return "\n".join(lines)

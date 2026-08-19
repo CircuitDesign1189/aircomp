@@ -16,14 +16,19 @@ from airComp.config import ITEM_TYPES
 from airComp.env.negotiation import Pool
 from airComp.eval.reconstruction import (
     MIN_INPUT_DEPENDENCE,
+    embed_reconstruction_table,
+    embed_verdict,
+    format_embed_table,
     format_table,
     reconstruction_table,
     verdict,
 )
-from airComp.jscc.modules import SemanticDecoder, SemanticEncoder
+from airComp.jscc.losses import embed_cosine_loss
+from airComp.jscc.modules import SemanticDecoder, SemanticEncoder, pool_to_mask
 
 K = 8
 MAX_COUNT = 2
+EMBED_DIM = 12
 CLASSES = [(0, 0, 0), (1, 0, 1), (2, 1, 0), (0, 2, 2)]
 
 
@@ -127,6 +132,83 @@ def test_format_table_states_the_verdict():
 
     assert "PASS" in text or "FAIL" in text
     assert "modal const" in text
+
+
+def _examples_embed(n: int = 128, input_dim: int = 16):
+    """Same trivially-learnable setup as `_examples`, but each class also gets
+    a fixed random target embedding to stand in for `embed_target`."""
+    g = torch.Generator().manual_seed(1)
+    class_targets = torch.randn(len(CLASSES), EMBED_DIM, generator=g)
+    out = []
+    for i in range(n):
+        cls = i % len(CLASSES)
+        hidden = torch.zeros(input_dim)
+        hidden[cls] = 1.0
+        hidden += 0.01 * torch.randn(input_dim, generator=g)
+        counts = dict(zip(ITEM_TYPES, CLASSES[cls]))
+        out.append(
+            SimpleNamespace(
+                hidden=hidden,
+                action_idx=cls % 3,
+                counts=counts,
+                pool=Pool(counts={t: MAX_COUNT for t in ITEM_TYPES}),
+                embed_target=class_targets[cls].clone(),
+            )
+        )
+    return out
+
+
+def _fit_embed(examples, steps: int = 400):
+    encoder = SemanticEncoder(examples[0].hidden.numel(), (32, 32), K)
+    decoder = SemanticDecoder(K, (32, 32), len(ITEM_TYPES), MAX_COUNT, 1, embed_dim=EMBED_DIM)
+    hidden = torch.stack([e.hidden for e in examples])
+    target = torch.stack([e.embed_target for e in examples])
+    masks = torch.stack([pool_to_mask(e.pool, ITEM_TYPES, MAX_COUNT) for e in examples])
+
+    opt = torch.optim.Adam([*encoder.parameters(), *decoder.parameters()], lr=3e-3)
+    torch.manual_seed(0)
+    for _ in range(steps):
+        opt.zero_grad()
+        loss = embed_cosine_loss(decoder(encoder(hidden), masks)["embed"], target)
+        loss.backward()
+        opt.step()
+    return encoder, decoder
+
+
+def test_a_trained_embed_head_is_reported_as_communicating():
+    examples = _examples_embed()
+    encoder, decoder = _fit_embed(examples)
+
+    table = embed_reconstruction_table(encoder, decoder, examples, (0.0, 20.0), MAX_COUNT)
+    ok, why = embed_verdict(table)
+
+    assert ok, why
+    assert table["input_dependence"] >= MIN_INPUT_DEPENDENCE
+
+
+def test_a_constant_embed_head_is_caught():
+    """The embed-head analog of the failure reconstruction_table exists to catch."""
+    examples = _examples_embed()
+    encoder, decoder = _fit_embed(examples)
+    with torch.no_grad():
+        decoder.trunk[0].weight.zero_()
+        decoder.trunk[0].bias.fill_(1.0)
+
+    table = embed_reconstruction_table(encoder, decoder, examples, (0.0, 20.0), MAX_COUNT)
+    ok, why = embed_verdict(table)
+
+    assert not ok
+    assert "input-independent" in why
+
+
+def test_format_embed_table_states_the_verdict():
+    examples = _examples_embed()
+    encoder, decoder = _fit_embed(examples)
+
+    text = format_embed_table(embed_reconstruction_table(encoder, decoder, examples, (0.0,), MAX_COUNT))
+
+    assert "PASS" in text or "FAIL" in text
+    assert "constant mean" in text
 
 
 def test_eval_mode_is_restored():

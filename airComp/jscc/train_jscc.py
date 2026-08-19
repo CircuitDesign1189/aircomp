@@ -18,10 +18,12 @@ from airComp.jscc.modules import SemanticDecoder, SemanticEncoder, pool_to_mask
 
 
 class _JsccTorchDataset(Dataset):
-    def __init__(self, examples: list, item_types=ITEM_TYPES, max_count: int = 4, include_embed_target: bool = False):
+    def __init__(self, examples: list, item_types=ITEM_TYPES, max_count: int = 4,
+                 include_values: bool = False, include_embed_target: bool = False):
         self.examples = examples
         self.item_types = item_types
         self.max_count = max_count
+        self.include_values = include_values
         self.include_embed_target = include_embed_target
 
     def __len__(self) -> int:
@@ -33,15 +35,15 @@ class _JsccTorchDataset(Dataset):
             [min(ex.counts.get(t, 0), self.max_count) for t in self.item_types], dtype=torch.long
         )
         mask = pool_to_mask(ex.pool, self.item_types, self.max_count)
-        values = torch.tensor([ex.values.get(t, 0.0) for t in self.item_types], dtype=torch.float32)
         item = {
             "hidden": ex.hidden.float(),
             "counts": counts,
             "action": torch.tensor(ex.action_idx, dtype=torch.long),
             "aux": torch.tensor([ex.aux], dtype=torch.float32),
             "mask": mask,
-            "values": values,
         }
+        if self.include_values:
+            item["values"] = torch.tensor([ex.values.get(t, 0.0) for t in self.item_types], dtype=torch.float32)
         if self.include_embed_target:
             item["embed_target"] = ex.embed_target.float()
         return item
@@ -78,8 +80,16 @@ def train(
             "examples with no embed_target -- recollect it with a LocalLLM backend that "
             "implements embed_text (only the CPU torch backend does; see airComp/agents/llm_backend.py)"
         )
+    want_utility = train_cfg.utility_loss_weight > 0
+    if want_utility and any(not hasattr(ex, "values") for ex in examples):
+        raise ValueError(
+            "train_cfg.utility_loss_weight requested but this dataset has examples with no "
+            "values field -- it predates that field, so Phase-2 utility training needs a "
+            "fresh collect-dataset run (see airComp/jscc/dataset.py:JsccExample)"
+        )
 
-    torch_ds = _JsccTorchDataset(examples, max_count=jscc_cfg.max_count, include_embed_target=want_embed)
+    torch_ds = _JsccTorchDataset(examples, max_count=jscc_cfg.max_count,
+                                 include_values=want_utility, include_embed_target=want_embed)
     loader = DataLoader(torch_ds, batch_size=train_cfg.batch_size, shuffle=True)
 
     encoder = SemanticEncoder(input_dim, jscc_cfg.encoder_hidden_dims, jscc_cfg.k).to(device)
@@ -90,7 +100,13 @@ def train(
     if init_checkpoint:
         ckpt = torch.load(init_checkpoint, weights_only=False)
         encoder.load_state_dict(ckpt["encoder"])
-        decoder.load_state_dict(ckpt["decoder"])
+        # strict=False: a Phase-1 checkpoint has no embed_head, since it was
+        # trained with embed_dim=None. Growing into the embed-head experiment
+        # from an existing checkpoint is the expected use of init_checkpoint,
+        # not a mismatch -- report what was newly initialized rather than fail.
+        missing, unexpected = decoder.load_state_dict(ckpt["decoder"], strict=False)
+        if missing or unexpected:
+            print(f"init_checkpoint: decoder missing {missing}, unexpected {unexpected}")
     channel = AnalogAWGNChannel().to(device)
 
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=train_cfg.lr)
@@ -105,7 +121,6 @@ def train(
             action = batch["action"].to(device)
             aux = batch["aux"].to(device)
             mask = batch["mask"].to(device)
-            values = batch["values"].to(device)
 
             snr_db = random.uniform(*jscc_cfg.snr_range)
 
@@ -119,6 +134,7 @@ def train(
                 + train_cfg.aux_loss_weight * aux_mse_loss(out["aux"], aux)
             )
             if train_cfg.utility_loss_weight:
+                values = batch["values"].to(device)
                 loss = loss + train_cfg.utility_loss_weight * expected_utility_loss(
                     out["offer_logits"], values, jscc_cfg.max_count
                 )
