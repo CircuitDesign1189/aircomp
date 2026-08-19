@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from airComp.agents.baseline_agent import TextAgent
+from airComp.agents.compact_agent import CompactAgent
 from airComp.agents.factory import build_llm
 from airComp.agents.semantic_agent import SemanticAgent
 from airComp.channel.digital import DigitalChannel
@@ -36,6 +37,20 @@ def _run_baseline_condition(llm, neg_cfg, snr_db, channel_mode, episodes, seed_o
         channel_b = DigitalChannel(mode=channel_mode, seed=seed * 2 + 1)
         agent_a = TextAgent(llm, channel_a, snr_db, neg_cfg.max_messages, neg_cfg.max_retries, neg_cfg.include_rationale)
         agent_b = TextAgent(llm, channel_b, snr_db, neg_cfg.max_messages, neg_cfg.max_retries, neg_cfg.include_rationale)
+        records.append(run_episode(agent_a, agent_b, seed, neg_cfg))
+    return records
+
+
+def _run_compact_condition(llm, neg_cfg, snr_db, channel_mode, episodes, seed_offset):
+    """Same shape as _run_baseline_condition, and the same seeds, so a compact run
+    and a text run at the same SNR see identical pools, values and LLM calls."""
+    records = []
+    for i in range(episodes):
+        seed = seed_offset + i
+        channel_a = DigitalChannel(mode=channel_mode, seed=seed * 2)
+        channel_b = DigitalChannel(mode=channel_mode, seed=seed * 2 + 1)
+        agent_a = CompactAgent(llm, channel_a, snr_db, neg_cfg.max_messages, neg_cfg.max_retries, neg_cfg.include_rationale)
+        agent_b = CompactAgent(llm, channel_b, snr_db, neg_cfg.max_messages, neg_cfg.max_retries, neg_cfg.include_rationale)
         records.append(run_episode(agent_a, agent_b, seed, neg_cfg))
     return records
 
@@ -71,16 +86,33 @@ def summarize(records: list, pipeline_key: str) -> dict:
 
 
 #: Conditions run by default. Selecting a subset matters for cost, not just tidiness:
-#: the baseline conditions are the expensive ones at low SNR, because corrupted JSON
-#: drives the parser's bounded retries and each episode costs up to 3x the LLM calls.
-#: Extending the grid downward to find the semantic knee is ~30 min semantic-only and
-#: hours with the baselines -- and the baselines are already flat at 0.00 by then.
-ALL_PIPELINES = ("raw", "arq", "semantic")
+#: the text-baseline conditions are the expensive ones at low SNR, because corrupted
+#: JSON drives the parser's bounded retries and each episode costs up to 3x the LLM
+#: calls. Extending the grid downward to find the semantic knee is ~30 min
+#: semantic-only and hours with the baselines -- and the baselines are flat at 0.00
+#: by then.
+#:
+#: The five conditions form the decomposition the comparison rests on:
+#:   raw / arq   -- the whole LLM completion on the wire, ~1000 bits/message
+#:   compact     -- the same act source-coded to 8 bits, uncoded
+#:   compact_fec -- the same 8 bits under Hamming(7,4): 16 channel uses, exactly
+#:                  matching the semantic latent's k=16
+#:   semantic    -- the analog latent
+#: raw->compact isolates source coding, compact->compact_fec isolates error
+#: correction, and compact_fec->semantic isolates what this project actually claims.
+ALL_PIPELINES = ("raw", "arq", "compact", "compact_fec", "semantic")
 
 
 def run_sweep(config_path: str, checkpoint_path: str, episodes: int, snr_grid: list, out_path: str,
-              pipelines=ALL_PIPELINES) -> dict:
+              pipelines=ALL_PIPELINES, survive_lost_messages: bool = False) -> dict:
     cfg = load_config(config_path)
+    if survive_lost_messages:
+        # Removes the largest structural asymmetry between the pipelines: a lost
+        # digital frame no longer ends the episode, so every pipeline gets the
+        # same max_messages turns. Semantic results are unaffected -- its decoder
+        # cannot produce an undecodable message -- so this only moves the
+        # baselines, and by how much is the point of running it.
+        cfg.negotiation.lost_message_ends_episode = False
     llm = build_llm(cfg.model)
 
     ckpt = torch.load(checkpoint_path, weights_only=False)
@@ -107,6 +139,8 @@ def run_sweep(config_path: str, checkpoint_path: str, episodes: int, snr_grid: l
         runners = {
             "raw": lambda: _run_baseline_condition(llm, cfg.negotiation, snr_db, "raw", episodes, seed_offset),
             "arq": lambda: _run_baseline_condition(llm, cfg.negotiation, snr_db, "arq", episodes, seed_offset),
+            "compact": lambda: _run_compact_condition(llm, cfg.negotiation, snr_db, "raw", episodes, seed_offset),
+            "compact_fec": lambda: _run_compact_condition(llm, cfg.negotiation, snr_db, "fec", episodes, seed_offset),
             "semantic": lambda: _run_semantic_condition(
                 llm, cfg.negotiation, jscc_cfg, encoder, decoder, snr_db, episodes, seed_offset, "cpu"),
         }

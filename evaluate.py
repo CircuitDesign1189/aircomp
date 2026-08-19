@@ -13,7 +13,8 @@ def cmd_run_baseline(args):
 
 
 def cmd_snr_sweep(args):
-    run_sweep(args.config, args.checkpoint, args.episodes, args.snr_grid, args.out, tuple(args.pipelines))
+    run_sweep(args.config, args.checkpoint, args.episodes, args.snr_grid, args.out,
+              tuple(args.pipelines), args.survive_lost_messages)
 
 
 def cmd_plot(args):
@@ -22,7 +23,7 @@ def cmd_plot(args):
     Takes several files because the simulated sweep and the hardware sweep are
     separate runs; the point of the figure is to see them together.
     """
-    series = plot_sweep(args.results, args.out, args.metric, args.floor)
+    series = plot_sweep(args.results, args.out, args.metric, args.floor, args.floor_label)
     for label, points in sorted(series.items()):
         span = f"{min(points):+.0f}..{max(points):+.0f} dB"
         print(f"  {label:16s} {len(points):2d} points over {span}")
@@ -74,6 +75,9 @@ def main():
     p_sweep.add_argument("--out", default="results/sweep.json")
     p_sweep.add_argument("--pipelines", nargs="+", default=list(ALL_PIPELINES), choices=list(ALL_PIPELINES),
                          help="subset to run; the baselines dominate the cost at low SNR")
+    p_sweep.add_argument("--survive-lost-messages", action="store_true",
+                         help="an undecodable message costs a turn instead of ending the episode; "
+                              "equalises the number of attempts each pipeline gets")
     p_sweep.set_defaults(func=cmd_snr_sweep)
 
     p_plot = sub.add_parser("plot", help="overlay sweep results (simulated and/or hardware)")
@@ -84,6 +88,8 @@ def main():
     p_plot.add_argument("--floor", type=float, default=None,
                         help="draw a no-information reference line; the semantic decoder scores "
                              "0.48 agreement on a channel carrying nothing, so omitting it overstates the tail")
+    p_plot.add_argument("--floor-label", default="no-information floor",
+                        help="name the pipeline the floor belongs to; floors differ per pipeline")
     p_plot.set_defaults(func=cmd_plot)
 
     p_check = sub.add_parser(

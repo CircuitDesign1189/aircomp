@@ -69,7 +69,7 @@ def load_series(results_paths, metric: str = "agreement_rate") -> dict:
 
 
 def plot_sweep(results_paths, out_path: str, metric: str = "agreement_rate",
-               floor: float | None = None) -> dict:
+               floor: float | None = None, floor_label: str = "no-information floor") -> dict:
     """Plot `metric` against SNR for every pipeline found. Returns what it drew.
 
     `floor` draws a horizontal reference line. Pass it whenever one is known: the
@@ -77,6 +77,12 @@ def plot_sweep(results_paths, out_path: str, metric: str = "agreement_rate",
     above zero on a channel carrying no information at all (measured 0.48 at
     -60 dB). Without that line the reader reads the low-SNR tail as communication
     when it is the decoder's prior, which overstates the result.
+
+    The floor is per-pipeline, not a property of the figure -- the compact
+    baselines floor at 0.02-0.10 because an undecodable frame is an implicit
+    REJECT. Name the pipeline in `floor_label` so one line is not read as
+    applying to all the curves. For a like-for-like comparison across pipelines
+    use airComp/eval/normalize.py, which divides each curve by its own range.
     """
     if isinstance(results_paths, str):
         results_paths = [results_paths]
@@ -94,7 +100,7 @@ def plot_sweep(results_paths, out_path: str, metric: str = "agreement_rate",
 
     if floor is not None:
         ax.axhline(floor, color="0.4", linestyle=":", linewidth=1.2)
-        ax.text(0.01, floor, f" no-information floor ({floor:.2f})", color="0.3",
+        ax.text(0.01, floor, f" {floor_label} ({floor:.2f})", color="0.3",
                 fontsize=8, va="bottom", transform=ax.get_yaxis_transform())
 
     ax.set_xlabel("measured SNR (dB)")

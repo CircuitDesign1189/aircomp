@@ -6,8 +6,14 @@ Two modes:
          demonstrates the catastrophic failure cliff of naive digital text
          communication under noise.
   "arq": CRC-8 appended; a failed checksum means the message is dropped
-         (treated as lost, not silently corrupted) -- the more realistic
-         "modern digital comms" baseline (error-detected-and-discarded).
+         (treated as lost, not silently corrupted) -- error-detected-and-discarded.
+  "fec": Hamming(7,4) forward error correction over a short bit frame. Reached
+         through `transmit_bits`, not `transmit`: it exists for the compact
+         baseline, whose payload is the 8-bit offer frame rather than text.
+
+Note that neither "raw" nor "arq" corrects errors -- CRC only detects them. A
+real digital link always carries FEC, so "fec" over the compact frame, not
+"arq" over prose, is the honest "modern digital comms" baseline.
 """
 from __future__ import annotations
 
@@ -29,6 +35,45 @@ def _crc8(data: bytes) -> int:
             else:
                 crc = (crc << 1) & 0xFF
     return crc
+
+
+#: Channel uses per message for the FEC-coded compact frame. Two Hamming(7,4)
+#: blocks carry the 8-bit offer frame in 14 bits; two zero bits pad the burst to
+#: 16 so that the compact baseline occupies **exactly the same number of real
+#: channel uses as the semantic pipeline's k=16 latent**, at the same SNR per
+#: real dimension. That equality is what makes the two directly comparable.
+FEC_FRAME_BITS = 16
+
+_H74_PARITY = ((0, 1, 3), (0, 2, 3), (1, 2, 3))  # data indices feeding p1, p2, p3
+_H74_LAYOUT = ("p0", "p1", 0, "p2", 1, 2, 3)  # codeword positions 1..7
+
+
+def hamming74_encode(nibble: np.ndarray) -> np.ndarray:
+    """4 data bits -> a 7-bit codeword that corrects any single-bit error."""
+    parity = [int(np.bitwise_xor.reduce(nibble[list(idx)])) for idx in _H74_PARITY]
+    return np.array(
+        [parity[int(s[1])] if isinstance(s, str) else int(nibble[s]) for s in _H74_LAYOUT],
+        dtype=np.uint8,
+    )
+
+
+def hamming74_decode(codeword: np.ndarray) -> np.ndarray:
+    """7 bits -> the 4 data bits, correcting a single-bit error if present.
+
+    Two or more errors are not detected; the syndrome points at an innocent bit
+    and decoding silently returns the wrong nibble. That is the correct
+    behaviour to model -- a real short block code degrades this way too.
+    """
+    word = codeword.astype(np.uint8).copy()
+    data = np.array([word[i] for i in (2, 4, 5, 6)], dtype=np.uint8)
+    parity = [word[0], word[1], word[3]]
+    syndrome = 0
+    for bit, idx in enumerate(_H74_PARITY):
+        s = int(parity[bit]) ^ int(np.bitwise_xor.reduce(data[list(idx)]))
+        syndrome |= s << bit
+    if syndrome:
+        word[syndrome - 1] ^= 1
+    return np.array([word[i] for i in (2, 4, 5, 6)], dtype=np.uint8)
 
 
 def text_to_bits(text: str) -> np.ndarray:
@@ -58,11 +103,59 @@ def bpsk_awgn(bits: np.ndarray, snr_db: float, rng: np.random.Generator) -> np.n
 
 class DigitalChannel(Channel):
     def __init__(self, mode: str = "raw", seed: Optional[int] = None):
-        assert mode in ("raw", "arq")
+        assert mode in ("raw", "arq", "fec")
         self.mode = mode
         self.rng = np.random.default_rng(seed)
 
+    def transmit_bits(self, bits: np.ndarray, snr_db: float):
+        """Send a short bit frame -- the compact baseline's path.
+
+        mode="raw": the frame goes on the wire uncoded.
+        mode="fec": Hamming(7,4) per nibble, zero-padded to FEC_FRAME_BITS.
+
+        Returns (received_bits_or_None, stats). Unlike the text path this never
+        returns None -- a short frame is always demodulated to *something*, and
+        whether it names a valid offer is the codec's judgement, not the
+        channel's.
+        """
+        bits = np.asarray(bits, dtype=np.uint8)
+        if self.mode == "arq":
+            raise ValueError("arq is a text-frame mode; use 'raw' or 'fec' for bit frames")
+
+        if self.mode == "fec":
+            if len(bits) % 4:
+                raise ValueError(f"fec needs a whole number of nibbles, got {len(bits)} bits")
+            coded = np.concatenate([hamming74_encode(bits[i:i + 4]) for i in range(0, len(bits), 4)])
+            sent = np.zeros(FEC_FRAME_BITS, dtype=np.uint8)
+            if len(coded) > FEC_FRAME_BITS:
+                raise ValueError(f"{len(coded)} coded bits exceed the {FEC_FRAME_BITS}-use budget")
+            sent[: len(coded)] = coded
+        else:
+            sent = bits
+
+        received = bpsk_awgn(sent, snr_db, self.rng)
+        channel_errors = int(np.sum(received != sent))
+        stats = {
+            "mode": self.mode,
+            "snr_db": snr_db,
+            "bit_errors": channel_errors,
+            "ber": channel_errors / len(sent) if len(sent) else 0.0,
+            "n_bits": int(len(sent)),  # channel uses, so the accounting stays honest
+        }
+
+        if self.mode != "fec":
+            return received, stats
+
+        decoded = np.concatenate(
+            [hamming74_decode(received[i:i + 7]) for i in range(0, len(coded), 7)]
+        )
+        stats["residual_bit_errors"] = int(np.sum(decoded != bits))
+        stats["fec_corrected"] = channel_errors - stats["residual_bit_errors"]
+        return decoded, stats
+
     def transmit(self, text: str, snr_db: float):
+        if self.mode == "fec":
+            raise ValueError("fec is a bit-frame mode; use transmit_bits")
         payload = text.encode("utf-8")
 
         if self.mode == "arq":

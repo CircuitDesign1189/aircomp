@@ -23,6 +23,10 @@ This connects two established research threads:
 - **Semantic communication / JSCC**: neural encoder/decoder pairs trained end-to-end to preserve
   task-relevant meaning under channel noise, rather than optimizing for exact bit recovery.
 
+`docs/results.md` is the current answer to "does this work?": **yes, 11–14 dB of effective SNR
+gain against `compact_fec`** — down from the 20–25 dB Phase 3 claimed against verbose JSON, because
+over half of that was source coding and missing FEC. Read it before quoting any number.
+
 `docs/related_work.md` places this project against those threads plus two more (the 3GPP/AI-RAN
 "AI-native air interface" standardization track, and the 2024-2026 LLM latent-communication
 literature). Read it before writing anything that claims novelty. Two things here are *not*
@@ -53,8 +57,16 @@ Two pipelines are compared on the same task under matched channel conditions:
 1. An LLM agent generates a structured JSON proposal as text.
 2. Text -> UTF-8 bits -> BPSK -> AWGN(`SNR_dB`) -> hard-decision demod -> bits -> UTF-8 (possibly
    corrupted) -> regex/JSON extraction -> pydantic validation.
-3. Two channel modes: `raw` (no FEC — demonstrates the catastrophic failure cliff) and `arq`
-   (CRC-8 detect-and-drop — the more realistic "modern digital comms" baseline).
+3. Two channel modes: `raw` (no FEC) and `arq` (CRC-8 detect-and-drop). **Neither corrects
+   errors, and both put the LLM's entire completion on the wire (~1000 bits to convey 6.1 bits
+   of offer).** They are the naive-digital reference point, not a fair baseline — see below.
+
+**Compact (fair digital) baseline** — `airComp/agents/compact_agent.py`,
+`airComp/baseline/offer_codec.py`: the same LLM turn, but the parsed offer is source-coded to a
+fixed 8-bit frame (index into the pool's feasible count-vectors + action) and sent over the same
+BPSK/AWGN channel. `compact_fec` adds Hamming(7,4), giving **16 channel uses — exactly the
+semantic pipeline's k=16 real channel uses at the same SNR per real dimension.** This is the
+only apples-to-apples comparison in the repo and the one any claim must be stated against.
 
 **Semantic/JSCC pipeline** — `airComp/agents/semantic_agent.py`, `airComp/channel/analog.py`,
 `airComp/jscc/`:
@@ -109,10 +121,11 @@ airComp/
     prompts.py                # system prompt templates, JSON schema instructions
     parser.py                  # regex+JSON extraction, pydantic Offer schema, bounded-retry logic
     baseline_agent.py         # TextAgent: LLM text turn -> DigitalChannel -> parsed Offer
+    compact_agent.py           # CompactAgent: same turn, offer source-coded to 8 bits (the fair baseline)
     semantic_agent.py         # SemanticAgent: hidden state -> SemanticEncoder -> AnalogAWGNChannel -> SemanticDecoder -> Offer
   channel/
     base.py                    # abstract Channel interface (future SDR backend implements this)
-    digital.py                  # DigitalChannel: bits/BPSK/AWGN/demod, "raw"/"arq" modes
+    digital.py                  # DigitalChannel: bits/BPSK/AWGN/demod, "raw"/"arq"/"fec" modes
     analog.py                    # AnalogAWGNChannel(nn.Module): differentiable AWGN on real vectors
     fading.py                     # optional Rayleigh block-fading variant (stretch)
   jscc/
@@ -122,8 +135,11 @@ airComp/
     train_jscc.py                    # training loop, SNR randomization, checkpointing
   baseline/
     run_baseline.py                   # orchestrates N episodes of TextAgent<->DigitalChannel<->TextAgent
+    offer_codec.py                     # Offer <-> fixed 8-bit frame, conditioned on the shared pool
   eval/
     metrics.py                         # agreement_rate, avg_utility, rounds_to_agreement, pareto_efficiency, effective_bits
+    normalize.py                        # floor/ceiling normalisation + effective SNR gain -- the headline number
+    reconstruction.py                    # is the decoder using the channel, or emitting a prior?
     snr_sweep.py                        # both pipelines x both channel modes across an SNR grid, paired seeds
     plots.py                             # matplotlib comparison plots
   utils/
@@ -169,14 +185,26 @@ pytest -m slow -q           # integration: requires the downloaded model
 
 ## Key design decisions worth knowing before changing this code
 
-- **Fairness between pipelines is load-bearing.** The semantic pipeline's sender-side hidden state
-  is pooled *only* over the offer-JSON token span (never chain-of-thought/private reasoning), and
-  the SNR sweep runs both pipelines against identical seeded pools/values. Any change to one
-  pipeline's information budget should be mirrored or explicitly justified as a documented
-  asymmetry.
+- **Fairness between pipelines is load-bearing, and it has already been got wrong once.** The
+  hidden state is pooled *only* over the offer-JSON token span, and the sweep uses identical
+  seeded pools/values — but Phase 3 still compared a 16-symbol latent against ~1000 bits of prose
+  and reported the resulting 20–25 dB as a JSCC result. It was mostly source coding. Before
+  claiming any gain, check all four budgets: **payload information content, channel uses, error
+  correction, and number of turns.** `compact_fec` equalises all four; `raw`/`arq` equalise none.
+- **Never compare raw agreement rates across pipelines.** They share neither a zero nor a one.
+  Floor (measured at −60 dB): semantic **0.48** — its decoder always emits a valid offer, so two
+  priors agree by coincidence — versus 0.02–0.10 for the compact pipelines, whose undecodable
+  frames are implicit REJECTs. Ceiling (measured at +40 dB): 0.90–0.98, differing because
+  `CompactAgent` must parse its own JSON and `SemanticAgent` does not. Use
+  `airComp/eval/normalize.py`, which divides each curve by its own floor-to-ceiling range.
+- **`lost_message_ends_episode` is a fairness knob, not a detail.** Default `True` reproduces
+  Phase 3, but it ends the episode on the first undecodable message — which only digital
+  pipelines can produce. Worth ~2 dB; set `False` (`--survive-lost-messages`) for fair numbers.
 - **Bits vs. symbols is not an apples-to-apples comparison.** Report both a raw payload-size
   comparison and a Shannon-capacity-equivalent bit estimate (`k * 0.5*log2(1+SNR_linear)`) for the
-  semantic channel — don't present bit counts alone as a bandwidth-fairness claim.
+  semantic channel — don't present bit counts alone as a bandwidth-fairness claim. Note the
+  estimate has a floor problem of its own: at −15 dB it says 0.83 bits/episode reach the receiver
+  while agreement reads 0.74, which is only possible because 0.48 of that is prior.
 - **Model choice**: Qwen2.5-1.5B-Instruct was picked over Llama-3.2-Instruct because it's ungated
   on Hugging Face (no license click-through) and fits fp16 comfortably without quantization.
   `bitsandbytes` is intentionally not a dependency (unreliable on Windows, unnecessary at this

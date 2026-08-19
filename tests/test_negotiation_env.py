@@ -113,3 +113,71 @@ def test_parse_failure_is_implicit_reject():
     record = run_episode(ParseFailureAgent(), agent_b, seed=9, cfg=cfg)
     assert record.outcome == "no_deal"
     assert len(record.turns) == 1
+
+
+# -- lost messages: one shot, or keep talking? --------------------------------
+#
+# Whether a lost message ends the episode is the largest structural asymmetry
+# between the pipelines: a digital frame can be undecodable, a SemanticDecoder
+# offer never is. The default reproduces Phase 3; the flag exists so the size of
+# that asymmetry can be measured rather than argued about.
+
+class _ScriptedAgent:
+    """Replays a fixed script of turns: None (lost), "accept", or "propose".
+
+    Offers are built against the pool handed to take_turn, so a scripted propose
+    is always in range and the test isolates the lost-message path.
+    """
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.turns_taken = 0
+
+    def take_turn(self, pool, own_values, round_index, history, standing_offer):
+        spec = self.script[min(self.turns_taken, len(self.script) - 1)]
+        self.turns_taken += 1
+        if spec is None:
+            return TurnRecord(raw_offer=None, received_offer=None, parse_failed=True)
+        if spec == "accept":
+            offer = Offer(action="accept")
+        else:
+            offer = Offer(action="propose", counts={t: 0 for t in pool.counts})
+        return TurnRecord(raw_offer=offer, received_offer=offer, parse_failed=False)
+
+
+def test_a_lost_message_ends_the_episode_by_default():
+    cfg = NegotiationConfig(max_messages=6)
+
+    record = run_episode(_ScriptedAgent([None]), _ScriptedAgent(["accept"]), seed=1, cfg=cfg)
+
+    assert record.outcome == "no_deal"
+    assert len(record.turns) == 1
+
+
+def test_the_negotiation_can_survive_a_lost_message():
+    """With the flag off, the turn is spent but the remaining turns survive, so
+    both pipelines get the same number of tries."""
+    cfg = NegotiationConfig(max_messages=6, lost_message_ends_episode=False)
+
+    record = run_episode(_ScriptedAgent([None]), _ScriptedAgent([None]), seed=1, cfg=cfg)
+
+    assert record.outcome == "no_deal"
+    assert len(record.turns) == cfg.max_messages
+    assert all(t.received_offer is None for t in record.turns)
+
+
+def test_a_lost_message_does_not_disturb_the_standing_offer():
+    """A proposal made before a loss is still on the table afterwards, so a later
+    accept can close the deal. This is what makes the flag a fair-comparison knob
+    rather than just a way to burn turns."""
+    cfg = NegotiationConfig(max_messages=4, lost_message_ends_episode=False)
+
+    record = run_episode(
+        _ScriptedAgent(["propose", None, "propose"]),
+        _ScriptedAgent([None, "accept"]),
+        seed=2,
+        cfg=cfg,
+    )
+
+    assert record.outcome == "agreement"
+    assert any(t.received_offer is None for t in record.turns)

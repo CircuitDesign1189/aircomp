@@ -36,6 +36,16 @@ class NegotiationConfig:
     max_messages: int = 10
     max_retries: int = 2
     include_rationale: bool = True
+    #: A message the receiver cannot decode ends the episode as a no-deal.
+    #:
+    #: This is a structural asymmetry between the pipelines, not a property of
+    #: either channel: a digital frame can be lost, so a digital agent gets one
+    #: shot, while `SemanticDecoder` always emits a valid offer and therefore
+    #: keeps all `max_messages` turns to converge. Set False to let the
+    #: negotiation survive a lost message -- `history_prompt` already renders it
+    #: as "[message lost / unparseable]" -- and the two pipelines then get the
+    #: same number of attempts. True reproduces the Phase 3 results.
+    lost_message_ends_episode: bool = True
 
 
 @dataclass

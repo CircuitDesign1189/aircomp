@@ -177,6 +177,13 @@ def run_episode(
 
         offer = turn.received_offer
         if offer is None:
+            if not cfg.lost_message_ends_episode:
+                # The turn is spent but the negotiation continues; the standing
+                # offer is untouched and the next speaker sees the gap in
+                # `history_prompt`. Without this, a digital pipeline gets exactly
+                # one chance per episode while the semantic pipeline -- which
+                # cannot produce an undecodable message -- gets max_messages.
+                continue
             record.outcome = "no_deal"
             break
         if offer.action == "reject":
