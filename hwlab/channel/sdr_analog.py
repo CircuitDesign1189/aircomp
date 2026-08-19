@@ -35,6 +35,7 @@ class SDRAnalogChannel:
         calibration: Calibration | None = None,
         fixed_gains: GainConfig | None = None,
         seed: int = 0,
+        fading: bool = False,
     ):
         self.link = link or LinkConfig()
         self.codec = BurstCodec(self.link, burst or BurstConfig())
@@ -42,6 +43,7 @@ class SDRAnalogChannel:
         self.calibration = calibration
         self.fixed_gains = fixed_gains or GainConfig()
         self.rng = np.random.default_rng(seed)
+        self.fading = fading
         self.stats_log: list = []
 
     @property
@@ -76,6 +78,24 @@ class SDRAnalogChannel:
         point = self.calibration.nearest(snr_db)
         return point.gains(), point
 
+    def _draw_fading_gain(self) -> complex:
+        """One block-fading realization per burst, applied on top of the fixed
+        attenuator/gain path -- still a single flat complex gain per burst
+        (see hwlab/dsp/equalize.py), just a random one instead of a constant.
+
+        Circularly-symmetric complex Gaussian, so |h| is Rayleigh with
+        E[|h|^2] = 1 -- same convention as the simulated
+        `airComp/channel/fading.py`. Magnitude is capped at 1 so a deep fade's
+        occasional |h| > 1 tail can never push the burst over the fixed TX
+        headroom (`LinkConfig.dac_peak`); per that file's own comment, TX scale
+        is deliberately NOT auto-adjusted per burst, so constructive gain above
+        unity is clipped away rather than risking clipping the DAC. This models
+        attenuating fades faithfully; it does not model constructive ones.
+        """
+        h = complex(self.rng.normal(), self.rng.normal()) / np.sqrt(2)
+        mag = abs(h)
+        return h if mag <= 1.0 else h / mag
+
     def transmit_reals(self, z: np.ndarray, snr_db: float) -> np.ndarray:
         """Send k reals over the radio and return what came back.
 
@@ -96,6 +116,10 @@ class SDRAnalogChannel:
         self.backend.configure(gains)
         tx = self.codec.modulate(z)
 
+        fading_gain = self._draw_fading_gain() if self.fading else None
+        if fading_gain is not None:
+            tx = tx * fading_gain
+
         attempts = 0
         for attempts in range(1, self.link.max_retries + 1):
             decoded = self.codec.demodulate(self.backend.send_and_capture(tx, self.codec.capture_samples))
@@ -115,6 +139,7 @@ class SDRAnalogChannel:
                         "attempts": attempts,
                         "burst_lost": False,
                         "gains": vars(gains).copy(),
+                        "applied_fading_gain_abs": float(abs(fading_gain)) if fading_gain is not None else None,
                     }
                 )
                 if decoded.levels["warnings"]:
@@ -135,6 +160,7 @@ class SDRAnalogChannel:
                 "attempts": attempts,
                 "burst_lost": True,
                 "gains": vars(gains).copy(),
+                "applied_fading_gain_abs": float(abs(fading_gain)) if fading_gain is not None else None,
             }
         )
         warnings.warn(

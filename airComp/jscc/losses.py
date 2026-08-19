@@ -22,6 +22,18 @@ def aux_mse_loss(aux_pred: torch.Tensor, aux_true: torch.Tensor) -> torch.Tensor
     return F.mse_loss(aux_pred, aux_true)
 
 
+def embed_cosine_loss(embed_pred: torch.Tensor, embed_target: torch.Tensor) -> torch.Tensor:
+    """Phase-2/3 surrogate for SemanticDecoder's optional injectable embed head.
+
+    Cosine rather than MSE: `embed_target` is a mean-pooled input-embedding
+    vector (airComp/jscc/dataset.py), whose norm is an artifact of the
+    canonical text's token count, not a signal worth matching exactly -- what
+    matters for an injected soft prompt is landing in the right direction of
+    the model's own embedding space.
+    """
+    return (1.0 - F.cosine_similarity(embed_pred, embed_target, dim=-1)).mean()
+
+
 def expected_utility_loss(offer_logits: torch.Tensor, values_per_type: torch.Tensor, max_count: int) -> torch.Tensor:
     """Phase-2 differentiable surrogate: negative expected utility under the softmax
     distribution over each type's count, summed across types.

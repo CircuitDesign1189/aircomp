@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 
 from airComp.baseline.run_baseline import run as run_baseline_fn
-from airComp.eval.plots import plot_sweep
+from airComp.eval.plots import plot_latent_examples, plot_sweep
 from airComp.eval.snr_sweep import ALL_PIPELINES, run_sweep
 
 
@@ -55,6 +55,31 @@ def cmd_decoder_check(args):
     return 0 if verdict(table)[0] else 1
 
 
+def cmd_visualize_latent(args):
+    """Render a few example latent vectors as PNGs, clean vs. channel-noisy.
+
+    For seeing, not measuring: makes concrete what "analog" means for the
+    semantic pipeline. See airComp/eval/plots.py:plot_latent_examples.
+    """
+    import torch
+
+    from airComp.channel.analog import AnalogAWGNChannel
+    from airComp.config import JSCCConfig
+    from airComp.jscc.modules import SemanticEncoder
+
+    ckpt = torch.load(args.checkpoint, weights_only=False)
+    cfg: JSCCConfig = ckpt.get("jscc_cfg", JSCCConfig())
+    encoder = SemanticEncoder(ckpt["input_dim"], cfg.encoder_hidden_dims, cfg.k)
+    encoder.load_state_dict(ckpt["encoder"])
+    encoder.eval()
+
+    examples = torch.load(args.dataset, weights_only=False)
+    written = plot_latent_examples(encoder, AnalogAWGNChannel(), examples, args.out_dir,
+                                    snr_db=args.snr_db, n=args.n)
+    for path in written:
+        print(f"wrote {path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +125,17 @@ def main():
     p_check.add_argument("--dataset", required=True)
     p_check.add_argument("--snr-grid", type=float, nargs="+", default=[-10, -5, 0, 5, 10, 20])
     p_check.set_defaults(func=cmd_decoder_check)
+
+    p_viz = sub.add_parser(
+        "visualize-latent",
+        help="render a few example latent vectors as PNGs, clean vs. channel-noisy",
+    )
+    p_viz.add_argument("--checkpoint", required=True)
+    p_viz.add_argument("--dataset", required=True)
+    p_viz.add_argument("--out-dir", default="results/latent_examples")
+    p_viz.add_argument("--n", type=int, default=3)
+    p_viz.add_argument("--snr-db", type=float, nargs="+", default=[20.0, -5.0])
+    p_viz.set_defaults(func=cmd_visualize_latent)
 
     args = parser.parse_args()
     raise SystemExit(args.func(args) or 0)

@@ -57,6 +57,58 @@ class LocalLLM:
         return text
 
     @torch.no_grad()
+    def embed_text(self, text: str) -> torch.Tensor:
+        """Mean-pooled input embedding of `text` -- an embedding-matrix lookup,
+        not a forward pass. This is the space `SemanticDecoder`'s optional embed
+        head is trained toward (`JsccExample.embed_target`,
+        `airComp/jscc/dataset.py:offer_canonical_text`), so a soft prompt built
+        from it lands where the model already expects text to live.
+        """
+        ids = self.tokenizer(text, return_tensors="pt").to(self.device)["input_ids"]
+        embeds = self.model.get_input_embeddings()(ids)[0]  # (seq_len, hidden_dim)
+        return embeds.mean(dim=0).float().cpu()
+
+    @torch.no_grad()
+    def chat_with_soft_prompt(
+        self,
+        system_prompt: str,
+        history: list,
+        user_prompt: str,
+        soft_prompt_embed: torch.Tensor,
+        max_new_tokens: int = 200,
+        temperature: float = 0.7,
+    ) -> str:
+        """Like `chat`, but `soft_prompt_embed` (hidden_dim,) is prepended as one
+        extra embedding-space token in front of the tokenized prompt.
+
+        This is the injection point the ONNX genai/DirectML backend cannot
+        offer (it only ever calls `append_tokens` on token ids -- see
+        CLAUDE.md), so it exists only here, on the CPU torch path.
+        """
+        messages = self._build_messages(system_prompt, history, user_prompt)
+        prompt_text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.device)
+        text_embeds = self.model.get_input_embeddings()(inputs["input_ids"])  # (1, seq_len, hidden_dim)
+
+        soft = soft_prompt_embed.to(device=self.device, dtype=text_embeds.dtype).view(1, 1, -1)
+        inputs_embeds = torch.cat([soft, text_embeds], dim=1)
+        attention_mask = torch.cat(
+            [inputs["attention_mask"].new_ones((1, 1)), inputs["attention_mask"]], dim=1
+        )
+
+        gen_out = self.model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=temperature > 0,
+            temperature=max(temperature, 1e-5),
+            pad_token_id=self.tokenizer.eos_token_id,
+        )
+        # generate() given inputs_embeds (no input_ids) returns ONLY the newly
+        # generated ids -- there is no token-id prompt to slice past.
+        return self.tokenizer.decode(gen_out[0], skip_special_tokens=True)
+
+    @torch.no_grad()
     def chat_with_hidden(
         self,
         system_prompt: str,

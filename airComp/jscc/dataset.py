@@ -26,10 +26,33 @@ class JsccExample:
     counts: dict  # item_type -> int; all zero when action != "propose"
     aux: float  # heuristic "concession rate" proxy in [0, 1]
     pool: Pool
+    #: The acting agent's own per-unit values at this turn (item_type -> float).
+    #: Needed for the Phase-2 expected-utility surrogate (airComp/jscc/losses.py);
+    #: datasets collected before this field existed do not have it, so Phase-2
+    #: training requires a fresh collect-dataset run.
+    values: dict
+    #: (hidden_dim,) mean-pooled input embedding of `offer_canonical_text(...)`,
+    #: in the SAME model's own embedding space (LocalLLM.embed_text). Training
+    #: target for SemanticDecoder's optional embed head -- see modules.py. None
+    #: for datasets collected before this field existed, or via a backend that
+    #: has no embed_text (only the CPU torch LocalLLM implements it).
+    embed_target: torch.Tensor | None = None
 
 
 def _concession_rate(round_index: int, max_messages: int) -> float:
     return round_index / max(max_messages - 1, 1)
+
+
+def offer_canonical_text(action: str, counts: dict) -> str:
+    """Deterministic text rendering of a turn's communicative content -- the
+    string `LocalLLM.embed_text` embeds to produce `JsccExample.embed_target`
+    (see `airComp/jscc/modules.py`'s injectable embed head). Terse on purpose:
+    this is an embedding target, not a prompt meant to read naturally.
+    """
+    if action != "propose":
+        return action
+    items = ", ".join(f"{t}={n}" for t, n in sorted(counts.items()) if n > 0) or "nothing"
+    return f"propose: {items}"
 
 
 def collect_dataset(
@@ -82,6 +105,12 @@ def collect_dataset(
             # turn the receiver is being trained to reconstruct.
             hidden = hidden_by_attempt[attempts - 1]
             counts = offer.counts if offer.action == "propose" else {t: 0 for t in pool.counts}
+
+            embed_target = None
+            embed_fn = getattr(llm, "embed_text", None)
+            if embed_fn is not None:
+                embed_target = embed_fn(offer_canonical_text(offer.action, counts))
+
             examples.append(
                 JsccExample(
                     hidden=hidden,
@@ -89,6 +118,8 @@ def collect_dataset(
                     counts=counts,
                     aux=_concession_rate(turn_index, cfg.max_messages),
                     pool=pool,
+                    values=dict(own_values.per_unit),
+                    embed_target=embed_target,
                 )
             )
 

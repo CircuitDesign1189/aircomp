@@ -25,7 +25,7 @@ INPUT_DIM = 64
 K = 16
 
 
-def make_channel(tx_vga_db: float = 30.0, **loopback) -> SDRAnalogChannel:
+def make_channel(tx_vga_db: float = 30.0, fading: bool = False, seed: int = 0, **loopback) -> SDRAnalogChannel:
     backend = LoopbackBackend(LoopbackConfig(**loopback))
     return SDRAnalogChannel(
         backend,
@@ -33,6 +33,8 @@ def make_channel(tx_vga_db: float = 30.0, **loopback) -> SDRAnalogChannel:
         BurstConfig(),
         calibration=None,
         fixed_gains=GainConfig(tx_vga_db=tx_vga_db),
+        fading=fading,
+        seed=seed,
     )
 
 
@@ -153,6 +155,49 @@ def test_rejects_k_mismatch():
     )
     with pytest.raises(ValueError, match="burst carries"):
         channel(torch.randn(1, K), 10.0)
+
+
+def test_fading_off_by_default_reports_no_gain():
+    channel = make_channel()
+    z = torch.randn(1, K)
+    z = z * (K**0.5) / z.norm(dim=-1, keepdim=True)
+
+    channel(z, 10.0)
+
+    assert channel.last_stats["applied_fading_gain_abs"] is None
+
+
+def test_fading_gain_varies_and_stays_within_tx_headroom():
+    """Rayleigh block fading, one draw per burst -- must never exceed unity
+    magnitude (hwlab/channel/sdr_analog.py:_draw_fading_gain), or a deep-fade
+    tail could push the fixed TX scale past the DAC's headroom."""
+    channel = make_channel(fading=True)
+    z = torch.randn(1, K)
+    z = z * (K**0.5) / z.norm(dim=-1, keepdim=True)
+
+    gains = []
+    for _ in range(20):
+        channel(z, 10.0)
+        gains.append(channel.last_stats["applied_fading_gain_abs"])
+
+    assert all(g is not None and 0.0 <= g <= 1.0 for g in gains)
+    assert len(set(np.round(gains, 6))) > 1  # actually varies burst to burst, not a fixed gain
+
+
+def test_fading_widens_the_measured_snr_spread():
+    """The point of fading: burst-to-burst SNR should vary more than the fixed
+    attenuated path, since a deep fade knocks a given burst's SNR down while the
+    calibrated nominal setting stays the same."""
+
+    def measured_snr_std(fading: bool) -> float:
+        channel = make_channel(fading=fading, seed=1)
+        z = torch.randn(1, K)
+        z = z * (K**0.5) / z.norm(dim=-1, keepdim=True)
+        for _ in range(40):
+            channel(z, 10.0)
+        return float(np.std([s["measured_snr_db"] for s in channel.stats_log if s["measured_snr_db"] is not None]))
+
+    assert measured_snr_std(fading=True) > measured_snr_std(fading=False)
 
 
 # --- agent ------------------------------------------------------------------

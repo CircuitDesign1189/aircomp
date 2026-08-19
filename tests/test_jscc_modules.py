@@ -45,3 +45,27 @@ def test_decoder_output_shapes_batch():
     assert out["offer_logits"].shape == (batch, len(ITEM_TYPES), max_count + 1)
     assert out["action_logits"].shape == (batch, 3)
     assert out["aux"].shape == (batch, 1)
+
+
+def test_decoder_has_no_embed_head_by_default():
+    """Default (embed_dim=None) must not change -- every existing checkpoint's
+    state_dict was saved without this head."""
+    decoder = SemanticDecoder(k=8, num_types=len(ITEM_TYPES))
+    pool = Pool(counts={"book": 2, "hat": 2, "ball": 2})
+    mask = pool_to_mask(pool, ITEM_TYPES, 4).unsqueeze(0)
+
+    out = decoder(torch.randn(1, 8), mask)
+
+    assert decoder.embed_head is None
+    assert "embed" not in out
+
+
+def test_decoder_emits_embed_when_embed_dim_is_set():
+    k, embed_dim, batch = 8, 1536, 2
+    decoder = SemanticDecoder(k=k, num_types=len(ITEM_TYPES), embed_dim=embed_dim)
+    pool = Pool(counts={"book": 2, "hat": 2, "ball": 2})
+    mask = pool_to_mask(pool, ITEM_TYPES, 4).unsqueeze(0).expand(batch, -1, -1)
+
+    out = decoder(torch.randn(batch, k), mask)
+
+    assert out["embed"].shape == (batch, embed_dim)

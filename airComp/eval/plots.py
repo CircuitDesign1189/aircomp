@@ -14,8 +14,11 @@ hardware and simulated semantic curves is therefore a bug, not a physical effect
 from __future__ import annotations
 
 import json
+import os
 
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
 #: Keys that sit alongside the pipeline series in a results file but are not
 #: series themselves -- e.g. run_sdr_sweep writes a flat "channel" accounting
@@ -111,3 +114,41 @@ def plot_sweep(results_paths, out_path: str, metric: str = "agreement_rate",
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return series
+
+
+def plot_latent_examples(encoder, channel, examples, out_dir: str,
+                          snr_db=(20.0, -5.0), n: int = 3) -> list[str]:
+    """One PNG per example: the clean latent vector vs. its noisy channel output.
+
+    Makes "the semantic pipeline is analog" concrete -- each bar is one real
+    component of the k-dim vector actually carried over `AnalogAWGNChannel`,
+    not a bit. `z` is power-normalized upstream (see SemanticEncoder), so the
+    same y-axis is meaningful across the clean and noisy series.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    with torch.no_grad():
+        for i, example in enumerate(examples[:n]):
+            z = encoder(example.hidden.unsqueeze(0))[0]
+            series = {"clean": z.numpy()}
+            for snr in snr_db:
+                series[f"{snr:+.0f} dB"] = channel(z, snr).numpy()
+
+            k = z.shape[0]
+            dims = np.arange(k)
+            width = 0.8 / len(series)
+
+            fig, ax = plt.subplots()
+            for j, (label, values) in enumerate(series.items()):
+                ax.bar(dims + j * width, values, width, label=label)
+            ax.set_xlabel("latent dimension")
+            ax.set_ylabel("amplitude")
+            ax.set_title(f"latent vector (k={k}) -- clean vs. noisy, example {i}")
+            ax.grid(alpha=0.3)
+            ax.legend()
+
+            out_path = os.path.join(out_dir, f"latent_example_{i}.png")
+            fig.savefig(out_path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            written.append(out_path)
+    return written

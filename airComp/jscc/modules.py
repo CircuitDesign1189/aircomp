@@ -5,6 +5,16 @@ real vector (the "channel uses" budget). SemanticDecoder reconstructs a
 structured offer directly (item counts + action + an auxiliary continuous
 "intent" signal) rather than attempting to reconstruct injectable LLM context
 across independently-instantiated model calls -- see CLAUDE.md for why.
+
+The structured heads are the default and are always trained. `embed_dim`
+additionally opts the decoder into emitting a `hidden_size`-dim vector meant to
+be injected as a soft prompt via `LocalLLM.chat_with_soft_prompt` (see
+`airComp/agents/llm_backend.py`) -- viable specifically because sender and
+receiver are the same model weights, sidestepping the cross-architecture
+alignment problem `docs/related_work.md` flags as unsolved for different
+models. Its training target (`JsccExample.embed_target`) is the mean-pooled
+input embedding of a canonical text rendering of the offer, not a live
+receiver-side forward pass -- see `airComp/jscc/dataset.py`.
 """
 from __future__ import annotations
 
@@ -35,7 +45,8 @@ class SemanticEncoder(nn.Module):
 
 
 class SemanticDecoder(nn.Module):
-    def __init__(self, k: int, hidden_dims=(128, 256), num_types: int = 3, max_count: int = 4, aux_dim: int = 1):
+    def __init__(self, k: int, hidden_dims=(128, 256), num_types: int = 3, max_count: int = 4, aux_dim: int = 1,
+                 embed_dim: int | None = None):
         super().__init__()
         h1, h2 = hidden_dims
         self.trunk = nn.Sequential(
@@ -49,6 +60,8 @@ class SemanticDecoder(nn.Module):
         self.offer_head = nn.Linear(h2, num_types * (max_count + 1))
         self.action_head = nn.Linear(h2, 3)
         self.aux_head = nn.Linear(h2, aux_dim)
+        #: None (default) preserves every existing checkpoint's state_dict shape.
+        self.embed_head = nn.Linear(h2, embed_dim) if embed_dim is not None else None
 
     def forward(self, y: torch.Tensor, pool_mask: torch.Tensor) -> dict:
         """pool_mask: (batch, num_types, max_count+1) bool -- True where a count is
@@ -59,7 +72,10 @@ class SemanticDecoder(nn.Module):
         offer_logits = offer_logits.masked_fill(~pool_mask, float("-inf"))
         action_logits = self.action_head(features)
         aux = self.aux_head(features)
-        return {"offer_logits": offer_logits, "action_logits": action_logits, "aux": aux}
+        out = {"offer_logits": offer_logits, "action_logits": action_logits, "aux": aux}
+        if self.embed_head is not None:
+            out["embed"] = self.embed_head(features)
+        return out
 
 
 def pool_to_mask(pool: Pool, item_types, max_count: int) -> torch.Tensor:

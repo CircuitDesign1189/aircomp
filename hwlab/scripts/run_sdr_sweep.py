@@ -67,6 +67,7 @@ def seed_offset_for(snr_db: float) -> int:
 
 def _burst_summary(stats: list) -> dict:
     measured = [s["measured_snr_db"] for s in stats if s.get("measured_snr_db") is not None]
+    fading_gains = [s["applied_fading_gain_abs"] for s in stats if s.get("applied_fading_gain_abs") is not None]
     return {
         "bursts": len(stats),
         "burst_loss_rate": float(np.mean([s["burst_lost"] for s in stats])) if stats else 0.0,
@@ -74,6 +75,7 @@ def _burst_summary(stats: list) -> dict:
         "measured_snr_db_std": float(np.std(measured)) if measured else None,
         "retry_rate": float(np.mean([s["attempts"] > 1 for s in stats])) if stats else 0.0,
         "rx_warnings": sorted({w for s in stats for w in s.get("rx_warnings", [])}),
+        "applied_fading_gain_abs_mean": float(np.mean(fading_gains)) if fading_gains else None,
     }
 
 
@@ -89,6 +91,10 @@ def main() -> int:
                         help="episodes per SNR point (hardware is slow; the software sweep uses 100)")
     parser.add_argument("--snr-grid", type=float, nargs="+", default=[-10, -5, 0, 5, 10, 15, 20])
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--fading", action="store_true",
+                        help="apply a random per-burst Rayleigh block-fading gain on top of the "
+                             "calibrated attenuation, still over the real conducted RF path -- see "
+                             "hwlab/channel/sdr_analog.py:_draw_fading_gain")
     parser.add_argument("--out", default="hwlab/results/sdr_sweep.json")
     args = parser.parse_args()
     return report_setup_problems(_run, args)
@@ -129,7 +135,7 @@ def _run(args) -> int:
         print(f"WARNING: no calibration at {hw.calibration_path!r}; using the fixed gains from the "
               f"config for every SNR point. Run hwlab.scripts.calibrate_snr first.")
 
-    channel = SDRAnalogChannel(backend, hw.link, hw.burst, calibration, hw.gains)
+    channel = SDRAnalogChannel(backend, hw.link, hw.burst, calibration, hw.gains, fading=args.fading)
     # Both pipelines share the one radio pair; the digital wrapper reuses the
     # analog channel's calibration, retry and burst-loss handling rather than
     # duplicating it, so the two paths cannot drift apart.

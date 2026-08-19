@@ -62,6 +62,10 @@ class JSCCConfig:
     max_count: int = 4
     aux_dim: int = 1
     snr_range: tuple = (-5.0, 20.0)
+    #: None (default) -- SemanticDecoder has no embed head, matching every
+    #: existing checkpoint. Set to the LLM's hidden_size to opt into the
+    #: injectable-embedding experiment (see airComp/jscc/modules.py).
+    embed_dim: int | None = None
 
 
 @dataclass
@@ -71,6 +75,14 @@ class TrainConfig:
     batch_size: int = 64
     action_loss_weight: float = 1.0
     aux_loss_weight: float = 0.1
+    #: Phase-2 knob: weight of the expected-utility surrogate (airComp/jscc/losses.py
+    #: :expected_utility_loss). 0.0 (default) reproduces Phase 1 exactly -- this is
+    #: additive on top of the supervised losses, not a separate training mode.
+    utility_loss_weight: float = 0.0
+    #: Weight of the injectable-embedding surrogate (airComp/jscc/losses.py
+    #: :embed_cosine_loss). Only has an effect when JSCCConfig.embed_dim is set,
+    #: since that is what gives the decoder an embed head to train.
+    embed_loss_weight: float = 0.0
 
 
 @dataclass

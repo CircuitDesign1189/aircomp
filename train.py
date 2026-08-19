@@ -42,12 +42,15 @@ def cmd_collect_dataset(args):
 
 def cmd_train_jscc(args):
     cfg = load_config(args.config)
-    jscc_cfg = JSCCConfig(k=args.k, snr_range=tuple(args.snr_range))
-    train_cfg = TrainConfig(epochs=args.epochs, lr=args.lr)
     llm = build_llm(cfg.model)
     input_dim = llm.hidden_size
+    jscc_cfg = JSCCConfig(k=args.k, snr_range=tuple(args.snr_range),
+                          embed_dim=input_dim if args.embed_loss_weight > 0 else None)
+    train_cfg = TrainConfig(epochs=args.epochs, lr=args.lr, utility_loss_weight=args.utility_loss_weight,
+                            embed_loss_weight=args.embed_loss_weight)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    result = train_jscc_fn(args.dataset, args.out, input_dim, jscc_cfg, train_cfg, device)
+    result = train_jscc_fn(args.dataset, args.out, input_dim, jscc_cfg, train_cfg, device,
+                           init_checkpoint=args.init_checkpoint)
     print(f"final loss: {result['loss_history'][-1]:.4f}")
 
 
@@ -71,6 +74,17 @@ def main():
     p_train.add_argument("--k", type=int, default=16)
     p_train.add_argument("--lr", type=float, default=1e-3)
     p_train.add_argument("--out", default="checkpoints/jscc_v1.pt")
+    p_train.add_argument("--utility-loss-weight", type=float, default=0.0,
+                         help="Phase 2: weight of the expected-utility surrogate on top of the "
+                              "Phase-1 supervised losses. 0.0 (default) is plain Phase 1.")
+    p_train.add_argument("--init-checkpoint", default=None,
+                         help="continue training from this checkpoint's encoder/decoder weights, "
+                              "e.g. a Phase-1 run, instead of training from scratch")
+    p_train.add_argument("--embed-loss-weight", type=float, default=0.0,
+                         help="injectable-embedding experiment: adds an embed head to the decoder "
+                              "(dim = the LLM's hidden_size) trained to reconstruct the canonical "
+                              "text embedding of the offer. Needs a dataset collected with the CPU "
+                              "torch backend (only it implements LocalLLM.embed_text).")
     p_train.set_defaults(func=cmd_train_jscc)
 
     args = parser.parse_args()
