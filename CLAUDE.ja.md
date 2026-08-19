@@ -1,5 +1,5 @@
 <!-- translation-of: CLAUDE.md -->
-<!-- source-sha256: de28f58a753c15b99905e31a02d25c3b060540a45d2015ead48710d80f694f4f -->
+<!-- source-sha256: 16a9c63bc85e5aca662e9db4449dfd418cc1c7fcb69b1cb4244f88725cb65f04 -->
 
 # CLAUDE.md（日本語訳）
 
@@ -154,6 +154,8 @@ airComp/
     seeding.py, logging.py, io.py         # RNG シード、JSONL エピソードログ、パス補助
 scripts/
   download_model.py                       # ローカル LLM を ./.hf_cache に事前ダウンロード
+  build_genai_model.py                    # onnxruntime-genai-directml のモデルディレクトリをビルド
+  probe_dual_genai.py                     # genai-directml セッションが GPU 上で2つ同時に動くか確認
 configs/
   base.yaml, snr_sweep.yaml
 tests/
@@ -256,3 +258,13 @@ pytest -m slow -q           # 統合: ダウンロード済みモデルが必要
   `torch.set_num_threads` を 8 から 16 に上げても何も変わらず（312 vs 315 ms/token）、
   これが帯域律速であることの裏付けになっている。dtype の変更を信じる前に、tokens/s だけでなく
   prefill を測ること。
+- **`onnxruntime-genai-directml` のセッションは、このマシンの GPU 上で2つ同時に動く**
+  （2026-08-19 検証、`scripts/probe_dual_genai.py`）: 1つ目の `OnnxDmlLLM` が生きたままでも
+  2つ目のロードと生成は問題なく成功し、専有 VRAM は1つあたり約 1.4 GB（合計約 3.4 GB、
+  この Radeon の予算に十分収まる）、交互生成でも測定可能な速度低下は無い（単独実行時の
+  0.86〜0.96 倍 — これはノイズであって競合ではない）。現在のパイプラインは今も両方の交渉側で
+  1つの `OnnxDmlLLM` を共有している（`airComp/agents/factory.py` の `build_llm` は1回の
+  実行につき1回しか呼ばれない）— 1組の重みが自己対戦で両役を演じているのであって、独立した
+  2つのモデルではない。この結果が示すのは GPU/ドライバが真に独立した2モデル構成を阻んで
+  いないということだけであり、実際に配線すること（2セッション、片側に1つずつ、それぞれが
+  `hwlab/` の `HardwareSemanticAgent` に供給する）はまだ手つかずの別の作業である。

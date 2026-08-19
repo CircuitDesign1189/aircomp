@@ -142,7 +142,21 @@ def _run(args) -> int:
     digital = SDRDigitalChannel(channel) if "compact_fec_hw" in args.pipelines else None
     print(f"channel cost per message: {channel.payload_accounting()}")
 
-    llm = build_llm(cfg.model)
+    # Two independent LLM sessions -- one per negotiating side -- rather than one
+    # shared model playing both roles. scripts/probe_dual_genai.py confirmed this
+    # GPU can hold two onnxruntime-genai-directml sessions concurrently at ~1.4 GB
+    # VRAM each with no measurable contention.
+    llm_a = build_llm(cfg.model)
+    llm_b = build_llm(cfg.model)
+    if cfg.model.backend == "onnx-dml":
+        # chat_with_hidden pools from a lazily-loaded 6 GB CPU torch copy of the
+        # same frozen backbone (airComp/agents/llm_onnx.py:_torch_backend). That
+        # pooling is a pure function of the shared weights and the token sequence,
+        # not of which session generated them, so there is nothing to gain from
+        # two independent 6 GB copies -- only RAM to lose. Force-build it once and
+        # hand it to the other session. The two *generation* sessions -- where
+        # each side's turn actually happens -- stay fully independent.
+        llm_b._torch_llm = llm_a._torch_backend()
 
     def make_semantic(snr_db):
         return [
@@ -151,7 +165,7 @@ def _run(args) -> int:
                 cfg.negotiation.max_messages, jscc_cfg.max_count, cfg.negotiation.include_rationale,
                 device=args.device, channel=channel,
             )
-            for _ in range(2)
+            for llm in (llm_a, llm_b)
         ]
 
     def make_compact(snr_db):
@@ -161,7 +175,7 @@ def _run(args) -> int:
                 cfg.negotiation.max_retries, cfg.negotiation.include_rationale,
                 channel=digital,
             )
-            for _ in range(2)
+            for llm in (llm_a, llm_b)
         ]
 
     builders = {"semantic_hw": make_semantic, "compact_fec_hw": make_compact}

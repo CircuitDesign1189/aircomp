@@ -153,6 +153,8 @@ airComp/
     seeding.py, logging.py, io.py         # RNG seeding, JSONL episode logging, path helpers
 scripts/
   download_model.py                       # pre-downloads the local LLM into ./.hf_cache
+  build_genai_model.py                    # builds the onnxruntime-genai-directml model directory
+  probe_dual_genai.py                     # checks whether two genai-directml sessions coexist on the GPU
 configs/
   base.yaml, snr_sweep.yaml
 tests/
@@ -251,3 +253,12 @@ pytest -m slow -q           # integration: requires the downloaded model
   goes from 2.8 s to 17 s; a full episode measured **32 s -> 60 s**. Raising `torch.set_num_threads`
   from 8 to 16 also changes nothing (312 vs 315 ms/token), which is what confirms the bandwidth
   limit. Measure the prefill, not just tokens/s, before believing any dtype change.
+- **Two `onnxruntime-genai-directml` sessions can run concurrently on this GPU** (verified
+  2026-08-19, `scripts/probe_dual_genai.py`): a second `OnnxDmlLLM` loads and generates fine while
+  a first is still live, ~1.4 GB dedicated VRAM each (~3.4 GB combined, well inside this Radeon's
+  budget), with no measurable slowdown under interleaved generation (0.86x-0.96x of solo
+  ms/token -- noise, not contention). Today's pipeline still shares one `OnnxDmlLLM` between both
+  negotiation sides (`airComp/agents/factory.py:build_llm` is called once per run) -- self-play
+  with one set of weights, not two independent models. This result only says the GPU/driver does
+  not block a genuine two-model architecture; wiring one up (two sessions, one per side, each
+  feeding a `HardwareSemanticAgent` in `hwlab/`) is separate, unstarted work.
