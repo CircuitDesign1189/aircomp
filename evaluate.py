@@ -86,6 +86,39 @@ def cmd_embed_check(args):
     return 0 if embed_verdict(table)[0] else 1
 
 
+def cmd_injection_check(args):
+    """Does conditioning the receiver on the decoded embedding change its
+    behavior, or is embed-check's cosine similarity just a property of the
+    vector? Needs the real local LLM -- unlike embed-check, there is no way
+    to answer this from the checkpoint and dataset alone.
+
+    See airComp/eval/injection_check.py.
+    """
+    import torch
+
+    from airComp.agents.llm_backend import LocalLLM
+    from airComp.config import ITEM_TYPES, JSCCConfig
+    from airComp.eval.injection_check import format_injection_table, injection_discrimination, verdict
+    from airComp.jscc.modules import SemanticDecoder, SemanticEncoder
+
+    ckpt = torch.load(args.checkpoint, weights_only=False)
+    cfg: JSCCConfig = ckpt.get("jscc_cfg", JSCCConfig())
+    if cfg.embed_dim is None:
+        raise SystemExit(f"{args.checkpoint} has no embed_dim -- train with --embed-loss-weight > 0 first")
+    encoder = SemanticEncoder(ckpt["input_dim"], cfg.encoder_hidden_dims, cfg.k)
+    decoder = SemanticDecoder(cfg.k, cfg.decoder_hidden_dims, len(ITEM_TYPES), cfg.max_count, cfg.aux_dim,
+                              embed_dim=cfg.embed_dim)
+    encoder.load_state_dict(ckpt["encoder"])
+    decoder.load_state_dict(ckpt["decoder"])
+
+    llm = LocalLLM(device="cpu")
+    examples = torch.load(args.dataset, weights_only=False)
+    results = injection_discrimination(llm, encoder, decoder, examples, args.snr_grid + [None],
+                                       n=args.n, max_count=cfg.max_count)
+    print(format_injection_table(results))
+    return 0 if verdict(results)[0] else 1
+
+
 def cmd_visualize_latent(args):
     """Render a few example latent vectors as PNGs, clean vs. channel-noisy.
 
@@ -166,6 +199,18 @@ def main():
     p_embed_check.add_argument("--dataset", required=True)
     p_embed_check.add_argument("--snr-grid", type=float, nargs="+", default=[-10, -5, 0, 5, 10, 20])
     p_embed_check.set_defaults(func=cmd_embed_check)
+
+    p_injection_check = sub.add_parser(
+        "injection-check",
+        help="does conditioning the receiver on the decoded embedding change its behavior? "
+             "Needs the real local LLM (slow, CPU torch)",
+    )
+    p_injection_check.add_argument("--checkpoint", required=True)
+    p_injection_check.add_argument("--dataset", required=True)
+    p_injection_check.add_argument("--snr-grid", type=float, nargs="+", default=[-10, 0])
+    p_injection_check.add_argument("--n", type=int, default=30,
+                                   help="examples to score per SNR point -- one forward pass each, cheap")
+    p_injection_check.set_defaults(func=cmd_injection_check)
 
     p_viz = sub.add_parser(
         "visualize-latent",

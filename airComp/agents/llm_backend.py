@@ -109,6 +109,41 @@ class LocalLLM:
         return self.tokenizer.decode(gen_out[0], skip_special_tokens=True)
 
     @torch.no_grad()
+    def score_completion_with_soft_prompt(
+        self,
+        system_prompt: str,
+        history: list,
+        user_prompt: str,
+        soft_prompt_embed: torch.Tensor,
+        completion_text: str,
+    ) -> float:
+        """Mean log-likelihood per token of `completion_text`, conditioned on
+        `soft_prompt_embed` the same way `chat_with_soft_prompt` injects it.
+
+        One forward pass, no generation loop -- this is the sensitive way to
+        ask "does conditioning on this vector shift the model toward the
+        right answer", without requiring the model to spontaneously generate
+        well-formed output from a soft prompt it was never trained to
+        interpret (see airComp/eval/injection_check.py).
+        """
+        messages = self._build_messages(system_prompt, history, user_prompt)
+        prompt_text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt_ids = self.tokenizer(prompt_text, return_tensors="pt").to(self.device)["input_ids"]
+        completion_ids = self.tokenizer(completion_text, return_tensors="pt").to(self.device)["input_ids"]
+
+        embed = self.model.get_input_embeddings()
+        prompt_embeds = embed(prompt_ids)  # (1, p, hidden)
+        completion_embeds = embed(completion_ids)  # (1, c, hidden)
+        soft = soft_prompt_embed.to(device=self.device, dtype=prompt_embeds.dtype).view(1, 1, -1)
+        inputs_embeds = torch.cat([soft, prompt_embeds, completion_embeds], dim=1)
+
+        ignore = torch.full((1, 1 + prompt_ids.shape[1]), -100, dtype=torch.long, device=self.device)
+        labels = torch.cat([ignore, completion_ids], dim=1)
+
+        loss = self.model(inputs_embeds=inputs_embeds, labels=labels).loss
+        return -loss.item()
+
+    @torch.no_grad()
     def chat_with_hidden(
         self,
         system_prompt: str,
