@@ -339,6 +339,50 @@ foreach ($m in "agreement_rate","avg_social_welfare","avg_pareto_efficiency") {
 }
 ```
 
+#### compact_fec の実機測定（2026-08-19、7点 × 15 エピソード）
+
+公平なデジタル基準線も同じベンチで測定した。結果は `hwlab/results/sdr_sweep_compact.json`。
+
+```powershell
+python -m hwlab.scripts.run_sdr_sweep --backend hackrf --pipelines compact_fec_hw `
+    --episodes 15 --out hwlab/results/sdr_sweep_compact.json
+```
+
+| 要求 SNR | 実測 SNR | 合意率 | バースト欠落 |
+|---:|---:|---:|---:|
+| −10 | −9.90 | 0.00 | 0% |
+| −5 | −4.22 | 0.07 | 0% |
+| 0 | −0.68 | 0.33 | 0% |
+| +5 | **+6.08** | 0.93 | 0% |
+| +10 | +9.78 | 0.87 | 0% |
+| +15 | +14.74 | 0.87 | 0% |
+| +20 | +20.16 | 0.87 | 0% |
+
+**全点でバースト欠落 0%、リトライ 0%、RX 警告ゼロ。** シミュレーションとの一致は
+χ² = 6.3（7 自由度）で、ばらつきはサンプリング雑音そのもの（[docs/results.md](../docs/results.md) §4）。
++5 dB 点が 1.36 dB ずれるのは semantic と同じ較正粒度の問題。
+
+##### 設計上の判断: バースト構造を変えていない
+
+**16 ビットの符号化フレームは 16 実数次元 = 8 複素シンボル**で、k=16 の潜在ベクトルと
+まったく同じバーストに載る。`burst.n_data` は 8 のまま、`sdr_link.yaml` は無変更。
+
+- [dsp/mapping.py](dsp/mapping.py) の `SIGNAL_POWER_PER_REAL = 1.0` は BPSK の ±1 に
+  **そのまま成立する**（電力ちょうど 1）。**再正規化はしない** — 同モジュールが警告している
+  1/√2 の再正規化こそが 3 dB ずれの入口
+- [dsp/burst.py](dsp/burst.py) の `tx_scale` は代表バーストから一度だけ決まる固定値なので、
+  ペイロードが定包絡線に変わっても送信電力は動かない。実測でも BPSK 側はクリップせず、
+  ピークはむしろ約 30% 低い（ガウス潜在は成分が 2.5 付近まで振れるため）。
+  **DAC ヘッドルームを使い残しているだけで、安全側**
+- [channel/sdr_digital.py](channel/sdr_digital.py) は `SDRAnalogChannel` を**保持**する
+  （継承ではない）。較正・リトライ・バースト欠落・統計は1箇所のまま
+- バースト欠落時は雑音のみが届き、硬判定でランダムビット → Hamming が別のニブルへ →
+  `bits_to_offer` が範囲外を返して暗黙の REJECT。シミュレーションと同じ扱い
+
+⚠ **BER の検定は実測 SNR に対して行うこと。** `snr_db` は*要求*であり、実 SNR は利得と
+減衰で決まる（較正テーブル経由でしか効かない）。要求値に対して検定すると全点が同じ値に
+張り付いて意味を持たない。
+
 結果の読み方は [docs/results.md](../docs/results.md)、先行研究に対する位置づけは
 [docs/related_work.md](../docs/related_work.md)。
 

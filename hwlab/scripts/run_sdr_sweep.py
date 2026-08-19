@@ -30,9 +30,10 @@ from airComp.env.negotiation import run_episode
 from airComp.eval.snr_sweep import summarize
 from airComp.jscc.modules import SemanticDecoder, SemanticEncoder
 from airComp.utils.io import write_json
-from hwlab.agent import HardwareSemanticAgent
+from hwlab.agent import HardwareCompactAgent, HardwareSemanticAgent
 from hwlab.channel.calibration import Calibration
 from hwlab.channel.sdr_analog import SDRAnalogChannel
+from hwlab.channel.sdr_digital import SDRDigitalChannel
 from hwlab.scripts._common import (
     add_common_args,
     build_backend,
@@ -44,6 +45,20 @@ from hwlab.scripts._common import (
 #: Must stay identical to airComp/eval/snr_sweep.py, or the paired-seed
 #: comparison against the simulation run is silently broken.
 SEED_OFFSET_BASE = 1_000_000
+
+#: What can be measured over the radio.
+#:
+#: `compact_fec_hw` is the fair digital baseline (airComp/agents/compact_agent.py):
+#: the offer source-coded to 8 bits under Hamming(7,4), which is 16 BPSK bits =
+#: 16 real dimensions = the same 8 complex symbols the k=16 latent occupies. Same
+#: burst, same transmit power, same SNR per real component -- so the two hardware
+#: curves are directly comparable, and each is comparable to its own simulation.
+#:
+#: The hardware reaches -11.6..+25.1 dB, so it can measure neither the -60 dB
+#: floor nor the +40 dB ceiling that airComp/eval/normalize.py needs. This sweep
+#: therefore does NOT re-derive the effective SNR gain; it checks that the DSP
+#: chain reproduces the simulation on both paths.
+ALL_HW_PIPELINES = ("semantic_hw", "compact_fec_hw")
 
 
 def seed_offset_for(snr_db: float) -> int:
@@ -66,7 +81,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_common_args(parser)
     parser.add_argument("--sim-config", default="configs/snr_sweep.yaml", help="airComp config (model, negotiation)")
-    parser.add_argument("--checkpoint", required=True, help="trained JSCC checkpoint")
+    parser.add_argument("--checkpoint", default=None,
+                        help="trained JSCC checkpoint; required only when semantic_hw is selected")
+    parser.add_argument("--pipelines", nargs="+", default=["semantic_hw"], choices=list(ALL_HW_PIPELINES),
+                        help="compact_fec_hw needs no checkpoint and is the fair digital baseline")
     parser.add_argument("--episodes", type=int, default=15,
                         help="episodes per SNR point (hardware is slow; the software sweep uses 100)")
     parser.add_argument("--snr-grid", type=float, nargs="+", default=[-10, -5, 0, 5, 10, 15, 20])
@@ -84,18 +102,23 @@ def _run(args) -> int:
     backend = build_backend(args, hw)
     print(check_clock(args, hw))
 
-    ckpt = torch.load(args.checkpoint, weights_only=False)
-    jscc_cfg: JSCCConfig = ckpt.get("jscc_cfg", cfg.jscc)
-    encoder = SemanticEncoder(ckpt["input_dim"], jscc_cfg.encoder_hidden_dims, jscc_cfg.k)
-    decoder = SemanticDecoder(jscc_cfg.k, jscc_cfg.decoder_hidden_dims, len(ITEM_TYPES), jscc_cfg.max_count, jscc_cfg.aux_dim)
-    encoder.load_state_dict(ckpt["encoder"])
-    decoder.load_state_dict(ckpt["decoder"])
+    encoder = decoder = None
+    jscc_cfg: JSCCConfig = cfg.jscc
+    if "semantic_hw" in args.pipelines:
+        if not args.checkpoint:
+            raise SystemExit("semantic_hw needs --checkpoint; compact_fec_hw does not")
+        ckpt = torch.load(args.checkpoint, weights_only=False)
+        jscc_cfg = ckpt.get("jscc_cfg", cfg.jscc)
+        encoder = SemanticEncoder(ckpt["input_dim"], jscc_cfg.encoder_hidden_dims, jscc_cfg.k)
+        decoder = SemanticDecoder(jscc_cfg.k, jscc_cfg.decoder_hidden_dims, len(ITEM_TYPES), jscc_cfg.max_count, jscc_cfg.aux_dim)
+        encoder.load_state_dict(ckpt["encoder"])
+        decoder.load_state_dict(ckpt["decoder"])
 
-    if 2 * hw.burst.n_data != jscc_cfg.k:
-        raise SystemExit(
-            f"checkpoint has k={jscc_cfg.k} but the burst carries {2*hw.burst.n_data} reals. "
-            f"Set burst.n_data = {jscc_cfg.k // 2} in {args.config}."
-        )
+        if 2 * hw.burst.n_data != jscc_cfg.k:
+            raise SystemExit(
+                f"checkpoint has k={jscc_cfg.k} but the burst carries {2*hw.burst.n_data} reals. "
+                f"Set burst.n_data = {jscc_cfg.k // 2} in {args.config}."
+            )
 
     calibration = None
     if hw.calibration_path and Path(hw.calibration_path).exists():
@@ -107,33 +130,54 @@ def _run(args) -> int:
               f"config for every SNR point. Run hwlab.scripts.calibrate_snr first.")
 
     channel = SDRAnalogChannel(backend, hw.link, hw.burst, calibration, hw.gains)
+    # Both pipelines share the one radio pair; the digital wrapper reuses the
+    # analog channel's calibration, retry and burst-loss handling rather than
+    # duplicating it, so the two paths cannot drift apart.
+    digital = SDRDigitalChannel(channel) if "compact_fec_hw" in args.pipelines else None
     print(f"channel cost per message: {channel.payload_accounting()}")
 
     llm = build_llm(cfg.model)
 
-    results = {"semantic_hw": {}, "channel": channel.payload_accounting()}
+    def make_semantic(snr_db):
+        return [
+            HardwareSemanticAgent(
+                llm, encoder, decoder, snr_db,
+                cfg.negotiation.max_messages, jscc_cfg.max_count, cfg.negotiation.include_rationale,
+                device=args.device, channel=channel,
+            )
+            for _ in range(2)
+        ]
+
+    def make_compact(snr_db):
+        return [
+            HardwareCompactAgent(
+                llm, digital, snr_db, cfg.negotiation.max_messages,
+                cfg.negotiation.max_retries, cfg.negotiation.include_rationale,
+                channel=digital,
+            )
+            for _ in range(2)
+        ]
+
+    builders = {"semantic_hw": make_semantic, "compact_fec_hw": make_compact}
+    results = {name: {} for name in args.pipelines}
+    results["channel"] = channel.payload_accounting()
     try:
         for snr_db in args.snr_grid:
-            mark = len(channel.stats_log)
-            offset = seed_offset_for(snr_db)
-            records = []
-            for i in range(args.episodes):
-                agents = [
-                    HardwareSemanticAgent(
-                        llm, encoder, decoder, snr_db,
-                        cfg.negotiation.max_messages, jscc_cfg.max_count, cfg.negotiation.include_rationale,
-                        device=args.device, channel=channel,
-                    )
-                    for _ in range(2)
-                ]
-                records.append(run_episode(agents[0], agents[1], offset + i, cfg.negotiation))
+            for name in args.pipelines:
+                mark = len(channel.stats_log)
+                offset = seed_offset_for(snr_db)
+                records = []
+                for i in range(args.episodes):
+                    agents = builders[name](snr_db)
+                    records.append(run_episode(agents[0], agents[1], offset + i, cfg.negotiation))
 
-            summary = summarize(records, "semantic")
-            summary.update(_burst_summary(channel.stats_log[mark:]))
-            summary["requested_snr_db"] = float(snr_db)
-            results["semantic_hw"][str(snr_db)] = summary
-            print(f"SNR request {snr_db:+.0f} dB -> measured {summary['measured_snr_db_mean']}, "
-                  f"agreement {summary['agreement_rate']:.2f}, loss {summary['burst_loss_rate']:.1%}")
+                summary = summarize(records, "semantic" if name == "semantic_hw" else "digital")
+                summary.update(_burst_summary(channel.stats_log[mark:]))
+                summary["requested_snr_db"] = float(snr_db)
+                results[name][str(snr_db)] = summary
+                print(f"SNR request {snr_db:+.0f} dB {name:14s} -> measured {summary['measured_snr_db_mean']}, "
+                      f"agreement {summary['agreement_rate']:.2f}, loss {summary['burst_loss_rate']:.1%}", flush=True)
+                write_json(args.out, results)
     finally:
         channel.close()
 

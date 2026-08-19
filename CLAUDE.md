@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **This file has a Japanese translation: [CLAUDE.ja.md](CLAUDE.ja.md). Edit both together.**
+> English is the source of truth; the translation carries a hash of the English it was made from.
+> `tests/test_claude_md_translation.py` fails when they drift, and it checks section structure as
+> well as the hash, so bumping the hash without translating the new text does not silence it.
+> After editing this file, translate the changed passages and update the hash line with
+> `python scripts/sync_translation.py --update`.
+
 ## Project vision
 
 AirComp is a research prototype exploring **AI-native wireless communication**: instead of AI

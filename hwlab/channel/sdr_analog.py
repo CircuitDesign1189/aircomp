@@ -76,6 +76,21 @@ class SDRAnalogChannel:
         point = self.calibration.nearest(snr_db)
         return point.gains(), point
 
+    def transmit_reals(self, z: np.ndarray, snr_db: float) -> np.ndarray:
+        """Send k reals over the radio and return what came back.
+
+        The numpy entry point. `__call__` is the torch-facing wrapper that
+        `SemanticAgent` needs; `hwlab/channel/sdr_digital.py` uses this one
+        directly so the compact baseline reuses the calibration, retry,
+        burst-loss and stats-logging logic here rather than reimplementing it.
+
+        What the k reals *mean* is not this method's business -- a power-
+        normalized latent and a BPSK +-1 frame both carry unit power per real
+        component (hwlab/dsp/mapping.py: SIGNAL_POWER_PER_REAL), so they occupy
+        the same burst at the same transmit power.
+        """
+        return self._transmit_one(np.asarray(z, dtype=float).reshape(-1), snr_db)
+
     def _transmit_one(self, z: np.ndarray, snr_db: float) -> np.ndarray:
         gains, point = self._gains_for(snr_db)
         self.backend.configure(gains)
