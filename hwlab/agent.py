@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """HardwareSemanticAgent -- SemanticAgent with its channel swapped for real RF.
 
 `airComp/` is intentionally left untouched. `SemanticAgent.__init__` hardcodes

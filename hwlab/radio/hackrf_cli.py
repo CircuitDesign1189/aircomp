@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """HackRF backend driven by the official `hackrf_transfer` command-line tool.
 
 Why subprocess rather than a Python binding: `hackrf_transfer` ships with the

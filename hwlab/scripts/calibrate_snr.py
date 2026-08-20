@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 2: measure the gain-setting -> SNR mapping and write a calibration table.
 
 A commanded TX gain is not an SNR. This sweeps TX gain with the RX gains held

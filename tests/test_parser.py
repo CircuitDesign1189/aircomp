@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 from airComp.agents.parser import parse_offer, parse_offer_with_retries
 from airComp.env.negotiation import Pool
 

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Per-burst noise and SNR measurement.
 
 The noise floor is measured in the burst's transmitted-zero guard region, in

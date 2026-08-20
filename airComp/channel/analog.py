@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Differentiable analog AWGN channel used by the semantic/JSCC pipeline.
 
 `z` is assumed power-normalized upstream (see SemanticEncoder), so `SNR_dB`

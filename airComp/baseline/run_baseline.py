@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Orchestrates N episodes of TextAgent<->DigitalChannel<->TextAgent, logging JSONL."""
 from __future__ import annotations
 

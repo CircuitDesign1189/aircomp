@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """CLI: run-baseline / snr-sweep / plot / decoder-check."""
 from __future__ import annotations
 

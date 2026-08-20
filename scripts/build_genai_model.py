@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Build the DirectML genai model that airComp/agents/llm_onnx.py runs on.
 
 One-time, offline. Produces a folder holding fused int4 DirectML kernels, which is

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Keep CLAUDE.ja.md in step with CLAUDE.md.
 
 English is the source of truth. The translation records the SHA-256 of the exact

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """BurstCodec -- ties mapping/framing/pulse/sync/equalize/measure together.
 
     z (k reals)  --modulate-->  full-scale IQ  --[ SDRBackend ]-->  IQ

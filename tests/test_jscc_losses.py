@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 
 from airComp.jscc.losses import embed_cosine_loss, expected_utility_loss

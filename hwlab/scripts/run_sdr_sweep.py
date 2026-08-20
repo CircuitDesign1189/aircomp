@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 3: run the semantic pipeline over the real RF link across an SNR grid.
 
 Episode seeds use the SAME formula as `airComp/eval/snr_sweep.py`

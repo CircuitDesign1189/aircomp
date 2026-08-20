@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Gain-setting <-> measured-SNR lookup, produced by scripts/calibrate_snr.py.
 
 A commanded gain is not an SNR. The link's mapping between the two depends on

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Comparison plots across SNR, from one or more sweep result files.
 
 The headline figure of this project overlays four curves on one axis: the two

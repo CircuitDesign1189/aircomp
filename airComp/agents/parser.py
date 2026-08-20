@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Extract and validate a structured Offer from raw LLM text output."""
 from __future__ import annotations
 

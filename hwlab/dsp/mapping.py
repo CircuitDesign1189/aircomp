@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """THE single definition of the SNR convention for the hardware link.
 
 Everything else in `hwlab` defers to this module. Getting this wrong shifts the

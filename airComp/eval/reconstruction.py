@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Offer-reconstruction accuracy — does the decoder actually use the channel?
 
 The task metrics (agreement rate, social welfare, Pareto efficiency) saturate.

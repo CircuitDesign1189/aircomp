@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end link tests over the loopback backend. No hardware required.
 
 These are the tests that decide whether the hardware results will be

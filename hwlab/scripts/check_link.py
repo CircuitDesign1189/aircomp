@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 1: is the link alive and correctly set up?
 
 Run this FIRST, before calibration and before any sweep. It answers, in order:

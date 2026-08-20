@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """The check that separates "robust" from "not communicating at all".
 
 The hardware sweep produced a flat task-metric curve from -10 to +20 dB. That is

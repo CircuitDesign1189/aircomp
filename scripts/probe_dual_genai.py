@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Probe: can two independent onnxruntime-genai-directml sessions run concurrently
 on this machine's single AMD GPU?
 

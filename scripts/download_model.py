@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Pre-download the local LLM into a project-local, gitignored cache directory."""
 from __future__ import annotations
 

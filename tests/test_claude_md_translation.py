@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """CLAUDE.ja.md must not drift away from CLAUDE.md.
 
 A translation with no enforcement rots: the English gets edited, the Japanese

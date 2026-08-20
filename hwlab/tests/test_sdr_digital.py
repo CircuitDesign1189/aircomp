@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """The compact baseline over real RF must land on the same SNR axis as the
 simulated one, or the hardware curve cannot be compared to `compact_fec` and
 the run is wasted bench time.

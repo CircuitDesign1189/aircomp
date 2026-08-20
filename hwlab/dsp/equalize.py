@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Least-squares channel estimation and zero-forcing equalization.
 
 The link is narrowband (100 ksym/s) and, in the conducted configuration, has no

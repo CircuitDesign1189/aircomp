@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Collect a supervised JSCC training set via frozen-LLM self-play over the
 baseline (text) pipeline. Ground truth for each turn is whatever the LLM
 itself intended to say that turn (its own parsed JSON) -- the decoder learns

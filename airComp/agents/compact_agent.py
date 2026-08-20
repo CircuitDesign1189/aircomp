@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Fair digital baseline: LLM generates JSON -> source-coded to 8 bits -> channel.
 
 `TextAgent` puts the LLM's entire completion on the wire (600-1350 bits of prose

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins the hardware link's SNR convention against airComp's simulation channel.
 
 If this file fails, every hardware-vs-simulation plot is off by a constant (in

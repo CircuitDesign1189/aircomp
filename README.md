@@ -12,7 +12,7 @@
 ## クイックスタート
 
 ```powershell
-python -m venv .venv
+python -m venv .venvは
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126   # GPU 版。CPU のみで動かす場合はこの行を省略

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """CLKOUT/CLKIN helpers -- the single most important piece of setup.
 
 Wiring #1's CLKOUT (10 MHz, 3.3 V square wave) to #2's CLKIN with a short SMA

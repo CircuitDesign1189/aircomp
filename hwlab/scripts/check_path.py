@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 0.5: is the RF path itself healthy, and is the receiver quiet?
 
 check_link answers "does a burst decode?", which is a yes/no that goes silent

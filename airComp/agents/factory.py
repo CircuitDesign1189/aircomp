@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """One place that decides which LLM backend the whole project uses.
 
 Before this, seven call sites each constructed LocalLLM directly, so switching

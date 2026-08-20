@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Integration test requiring the actual local LLM to be downloaded.
 Run with `pytest -m slow -q`.
 """

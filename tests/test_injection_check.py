@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Unit tests for injection_discrimination's aggregation/verdict logic.
 
 Uses stub encoder/decoder/LLM -- no real model needed. The question here is

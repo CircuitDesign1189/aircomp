@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Prompt templates shared by TextAgent and SemanticAgent.
 
 Both pipelines reuse `history_prompt` to describe prior turns to the LLM as

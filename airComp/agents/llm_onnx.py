@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """The LocalLLM interface, generated on the Radeon via onnxruntime-genai + DirectML.
 
 Why this exists: torch has no GPU path on this machine (AMD card, so no CUDA; and

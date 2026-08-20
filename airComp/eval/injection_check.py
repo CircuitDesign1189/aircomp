@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Does conditioning the receiver on the decoded embedding actually change its
 behavior, or does injecting it do nothing observable?
 

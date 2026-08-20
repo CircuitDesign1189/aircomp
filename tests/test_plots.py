@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """The comparison figure is the deliverable of this project, so its assembly is
 pinned here rather than discovered when a multi-hour sweep has just finished.
 

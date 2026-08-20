@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """The compact baseline is only a fair control if its codec is exact.
 
 If encode/decode loses information, the compact pipeline looks worse than

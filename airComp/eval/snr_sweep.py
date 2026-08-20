@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Run baseline (raw + arq) and semantic pipelines across an SNR grid with
 paired seeds, so the comparison isolates the effect of channel condition
 rather than random pool/value draws.

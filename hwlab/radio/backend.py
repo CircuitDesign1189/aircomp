@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """SDRBackend: the seam between DSP and hardware.
 
 The interface is deliberately narrow -- configure gains, then push a burst and

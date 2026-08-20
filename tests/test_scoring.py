@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 from airComp.env.negotiation import Pool, Values
 from airComp.env.scoring import pareto_frontier
 

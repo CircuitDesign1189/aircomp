@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Simulated conventional digital channel: UTF-8 text -> bits -> BPSK -> AWGN -> demod -> text.
 
 Two modes:

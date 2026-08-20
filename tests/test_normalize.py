@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """The headline number of this project is an effective SNR gain between two
 normalised curves. It was previously computed by hand in a shell one-liner,
 which is not something a result should depend on.

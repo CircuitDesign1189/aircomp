@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Thin wrapper around a local Hugging Face instruct model.
 
 `chat_with_hidden` is the piece the semantic/JSCC pipeline depends on: it

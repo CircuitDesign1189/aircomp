@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Deal-or-No-Deal-style bilateral bargaining environment.
 
 Two agents negotiate over a shared pool of items (book/hat/ball). Each agent has

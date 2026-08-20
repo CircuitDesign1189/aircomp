@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 1 training loop: supervised encoder+decoder training (through the
 differentiable analog channel) on a frozen-LLM self-play dataset, with
 SNR randomized per batch so the JSCC generalizes across channel conditions.

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Optional Rayleigh block-fading channel (stretch goal, not used by the
 default Milestone 1/2 pipelines). Applies one fading magnitude per
 transmission, then AWGN, then perfect-CSI equalization at the receiver.

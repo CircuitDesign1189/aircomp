@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Config loading, calibration persistence, and hackrf_transfer command building.
 
 The HackRF command construction is tested without a radio: getting a gain flag

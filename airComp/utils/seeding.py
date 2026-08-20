@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Circuit Design, Inc. and Y.Chosokabe
+# SPDX-License-Identifier: Apache-2.0
+
 """Reproducibility helper for scripts (episodes themselves take explicit seeds)."""
 from __future__ import annotations
 
